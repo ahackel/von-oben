@@ -9,20 +9,21 @@ const LIGHT = (() => { const l = [-0.45, -0.55, 1]; const n = Math.hypot(...l); 
 // round its shoulder)]
 function lumps(pose) {
   const L = [], add = (c, r, col, roll = 0, side = 1) => L.push({ c, r, col, roll, side });
-  const bob = pose.legs === 'walk0' || pose.legs === 'walk1' ? 0.5 : 0, z0 = pose.legs ? 0 : pose.swim ? -2.4 : 0;
+  const bob = pose.legs === 'walk0' || pose.legs === 'walk1' ? 0.5 : 0, z0 = pose.legs ? 0 : pose.swim ? -2.4 : pose.sleep ? -2.6 : 0;
+  const hx = pose.sleep ? -1.6 : 0, hz = pose.sleep ? -1.8 : 0; // (asleep: its head sunk, drawn back into its shoulders)
   const body = (dx, dz) => [dx, 0, 6 + dz + z0 - bob];
   add(body(0, 0), [5, 3, 3], 'darkBrown');
-  add(body(5.2, 3), [2.5, 2.2, 2.3], 'white'); // head
-  add(body(7.6, 2.5), [1.5, 0.8, 0.8], 'yellow'); // beak
+  add(body(5.2 + hx, 3 + hz), [2.5, 2.2, 2.3], 'white'); // head
+  add(body(7.6 + hx, 2.5 + hz), [1.5, 0.8, 0.8], 'yellow'); // beak
   add(body(-6.2, -0.4), [2.8, 2.1, 0.8], 'white'); // tail
   for (const s of [1, -1]) {
-    L.push({ c: [6.4, s * 1.5, 9.4 + z0 - bob], r: [0.5, 0.5, 0.5], col: 'black' }); // eye
+    if (!pose.sleep) L.push({ c: [6.4, s * 1.5, 9.4 + z0 - bob], r: [0.5, 0.5, 0.5], col: 'black' }); // eye (shut, asleep)
     if (pose.wings === undefined) add([-0.6, s * 2.6, 6.6 + z0 - bob], [4.8, 1, 2.2], 'deepBrown'); // folded
     else add([-0.4, s * 7.2, 6.8], [3.2, 6.6, 0.7], 'deepBrown', pose.wings, s); // spread
     if (pose.legs) {
       const f = pose.legs === 'walk0' ? s : pose.legs === 'walk1' ? -s : 0;
       add([0.5 + f * 1.2, s * 1.3, 1.6], [0.6, 0.6, 1.7], 'yellow');
-    } else if (!pose.swim) add([-3, s * 1, 3.6], [1, 0.5, 0.5], 'yellow'); // (tucked up, flying)
+    } else if (!pose.swim && !pose.sleep) add([-3, s * 1, 3.6], [1, 0.5, 0.5], 'yellow'); // (tucked up, flying)
   }
   return L;
 }
@@ -73,7 +74,7 @@ function render(pose, a) {
 
 export const DIRS = 16;
 const POSES = {
-  stand: { legs: 'stand' }, walk0: { legs: 'walk0' }, walk1: { legs: 'walk1' }, swim: { swim: true }, dive: { dive: true },
+  stand: { legs: 'stand' }, sleep: { sleep: true }, walk0: { legs: 'walk0' }, walk1: { legs: 'walk1' }, swim: { swim: true }, dive: { dive: true },
   glide: { wings: 0.08 }, fly0: { wings: 0.6 }, fly1: { wings: 0.2 }, fly2: { wings: -0.35 }, fly3: { wings: 0.05 },
 };
 const made = new Map();
@@ -85,6 +86,7 @@ export function eagle(pose, a) {
 }
 // which pose the bird is in
 export function poseOf(b) {
+  if (b.asleep) return 'sleep';
   if (b.state === 'swim') return 'swim';
   if (b.state === 'dive') return 'dive';
   if (b.state === 'air') return b.flapping && (b.climbing || b.flap % 2 < 1.4) ? `fly${Math.floor(b.flap * 8) % 4}` : 'glide';

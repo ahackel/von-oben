@@ -1,7 +1,7 @@
 // npm test: the island and the eagle without a screen: there is land and sea, a village; the eagle takes off, flies,
 // gets tired, glides down and lands when let go; it can't walk through a house; it eats; it swims, dives and (with luck) catches a fish.
 import assert from 'node:assert/strict';
-import { makeWorld, terrain, isWater, blocked, W, H, GRASS } from '../src/world.js';
+import { makeWorld, terrain, isWater, blocked, W, H, GRASS, ROCK, PERCH } from '../src/world.js';
 import { makeBird, step, CRUISE } from '../src/bird.js';
 
 const w = makeWorld();
@@ -45,4 +45,20 @@ for (let n = 0; n < 40 && !caught; n++) {
 }
 assert.ok(caught, 'caught a fish');
 assert.ok(terrain(w, w.village.x, w.village.y) !== GRASS, 'the street is a path');
+// home: the nest on its rock, in the mountains; landing in it, sleeping in it fills the energy up
+assert.equal(terrain(w, w.nest.x, w.nest.y), ROCK, 'the nest is on a rock');
+const n = makeBird(w.nest.x + 6, w.nest.y, PERCH + 4); n.state = 'air'; n.v = 30; n.a = Math.PI;
+run(n, { push: 0 }, 0.5);
+assert.ok(n.state === 'ground' && n.z === PERCH, 'lands in the nest');
+n.energy = 10; run(n, { push: 0 }, 1.5);
+assert.ok(n.asleep && n.energy > 10, 'asleep, getting its energy back');
+run(n, { push: 0 }, 5);
+assert.equal(n.energy, 100);
+run(n, { push: 0.3 }, 0.8);
+assert.ok(!n.asleep && n.state === 'air', 'walking off the rock: woken, gliding down');
+run(n, { push: 0 }, 3);
+assert.ok(n.state === 'ground' && n.z === 0 && !blocked(w, n.x, n.y), 'down beside the rock, free to walk');
+// out to sea, beyond the island's map
+const o = makeBird(W - 20, H / 2, CRUISE); o.state = 'air'; o.v = 90; o.a = 0; run(o, { push: 1 }, 10);
+assert.ok(o.x > W + 300 && o.state === 'air', 'far out over the sea');
 console.log('ok');
