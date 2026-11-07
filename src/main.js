@@ -73,7 +73,7 @@ function input(dt) { // (keys too: ←→ turn; ↑ held climbs the pace, slowly
 }
 
 function frame(now) {
-  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  const dt = Math.max(0, Math.min(0.05, (now - last) / 1000)); last = now; // (the first frame's time can be before the script ran)
   update(world, dt);
   if (started) step(bird, input(dt), dt, world);
   for (const e of bird.events.splice(0)) particles.push({ ...e, t: 0 });
