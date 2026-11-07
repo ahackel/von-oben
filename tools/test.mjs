@@ -1,7 +1,7 @@
 // npm test: the island and the eagle without a screen: there is land and sea, a village; the eagle takes off, flies,
 // gets tired, glides down and lands when let go; it can't walk through a house; it eats; it swims, dives and (with luck) catches a fish.
 import assert from 'node:assert/strict';
-import { makeWorld, terrain, isWater, blocked, W, H, GRASS, ROCK, PERCH } from '../src/world.js';
+import { makeWorld, update, terrain, isWater, blocked, W, H, GRASS, ROCK, DEEP, PERCH } from '../src/world.js';
 import { makeBird, step, CRUISE } from '../src/bird.js';
 
 const w = makeWorld();
@@ -29,19 +29,29 @@ const h = w.objects.find((o) => o.art.startsWith('house'));
 const g = makeBird(h.x, h.y + 12); g.a = -Math.PI / 2; run(g, { push: 0.6 }, 3);
 assert.ok(!blocked(w, g.x, g.y) && g.y >= h.y, 'stopped by the house');
 
-// food: walking over it
-const f = w.food.find((f) => f.gone <= 0);
-const e = makeBird(f.x - 3, f.y); e.a = 0; e.energy = 50; run(e, { push: 0.1 }, 0.5);
-assert.ok(f.gone > 0 && e.energy > 50, 'ate');
+// prey: startled by the eagle near and low, it runs off
+const f = w.food.find((f) => f.gone <= 0 && f.kind === 'mouse');
+const near = makeBird(f.x - 20, f.y), d0 = Math.hypot(f.x - near.x, f.y - near.y);
+for (let n = 0; n < 60; n++) update(w, 1 / 60, near);
+assert.ok(Math.hypot(f.x - near.x, f.y - near.y) > d0 + 5, 'the mouse runs away');
+// stooping on it: in the claws; eaten only on land
+const e = makeBird(f.x - 2, f.y, 10); e.state = 'air'; e.a = 0; e.energy = 50; run(e, { push: -1 }, 0.3);
+assert.ok(e.prey === 'mouse' && f.gone > 0 && e.energy < 51, 'caught, not eaten yet');
+run(e, { push: 0 }, 1.5);
+assert.ok(!e.prey && e.energy > 70 && e.caught === 1, 'eaten on land');
+// a fish, stooped on from the air: held while swimming, not eaten in the sea
+const fs = w.fish[1], sf = makeBird(fs.x, fs.y, 10); sf.state = 'air'; sf.v = 0; run(sf, { push: -1 }, 0.3);
+assert.ok(sf.prey === 'fish' && sf.state === 'swim', 'a fish in its claws');
+run(sf, { push: 0 }, 2); assert.equal(sf.prey, 'fish', 'not eaten in the sea');
 
 // the sea: swimming, diving, a fish now and then
 const fish = w.fish[0], s = makeBird(fish.x, fish.y); s.state = 'swim';
 let caught = 0;
 for (let n = 0; n < 40 && !caught; n++) {
-  s.x = fish.x; s.y = fish.y; fish.t = 0;
+  s.x = fish.x; s.y = fish.y; fish.t = 0; s.wet = 1;
   run(s, { push: -1 }, 0.1); assert.equal(s.state, 'dive');
   run(s, { push: 0 }, 1.5); assert.equal(s.state, 'swim');
-  caught = s.fish;
+  caught = s.prey === 'fish';
 }
 assert.ok(caught, 'caught a fish');
 assert.ok(terrain(w, w.village.x, w.village.y) !== GRASS, 'the street is a path');
@@ -58,6 +68,16 @@ run(n, { push: 0.3 }, 0.8);
 assert.ok(!n.asleep && n.state === 'air', 'walking off the rock: woken, gliding down');
 run(n, { push: 0 }, 3);
 assert.ok(n.state === 'ground' && n.z === 0 && !blocked(w, n.x, n.y), 'down beside the rock, free to walk');
+// rocks out in the sea: landing on one, but no sleep there
+const rocks = w.objects.filter((o) => o.perch && !o.nest);
+assert.ok(rocks.length >= 6 && rocks.some((o) => o.x > W || o.y > H || o.x < 0 || o.y < 0), `rocks at sea (${rocks.length})`);
+const r = rocks[0], k = makeBird(r.x + 6, r.y, PERCH + 4); k.state = 'air'; k.v = 30; k.a = Math.PI; k.energy = 10;
+run(k, { push: 0 }, 2);
+assert.ok(k.state === 'ground' && k.z === PERCH && !k.asleep, 'resting on a rock at sea');
+// small islands: land in the map's sea, away from the big island
+let isles = 0;
+for (let y = 8; y < H; y += 16) for (let x = 8; x < W; x += 16) if (!isWater(w, x, y) && [0, 1, 2, 3].every((q) => terrain(w, x + Math.cos(q * 1.57) * 160, y + Math.sin(q * 1.57) * 160) === DEEP)) isles++;
+assert.ok(isles > 0, 'small islands');
 // out to sea, beyond the island's map
 const o = makeBird(W - 20, H / 2, CRUISE); o.state = 'air'; o.v = 90; o.a = 0; run(o, { push: 1 }, 10);
 assert.ok(o.x > W + 300 && o.state === 'air', 'far out over the sea');

@@ -21,8 +21,19 @@ const elevationAt = (x, y, s) => { const nx = (x / W) * 2 - 1, ny = (y / H) * 2 
 
 export function makeWorld(seed = 7) {
   const rand = rng(seed), elev = new Float32Array(GW * GH), ground = new Uint8Array(GW * GH);
+  // small islands out in the sea: a hill each, raised from the sea floor (the highest bare rock on top)
+  const isles = [];
+  for (let n = 0; n < 500 && isles.length < 8; n++) {
+    const r = 40 + rand() * 75, x = r + 30 + rand() * (W - 2 * r - 60), y = r + 30 + rand() * (H - 2 * r - 60), base = elevationAt(x, y, seed);
+    if (base < -0.14 && isles.every((o) => Math.hypot(o.x - x, o.y - y) > o.r + r + 120)) isles.push({ x, y, r, top: 0.05 + rand() * 0.3 - base });
+  }
   for (let j = 0; j < GH; j++) for (let i = 0; i < GW; i++) {
-    const e = elevationAt(i * CELL, j * CELL, seed), k = j * GW + i;
+    const x = i * CELL, y = j * CELL, k = j * GW + i;
+    let e = elevationAt(x, y, seed);
+    for (const o of isles) if (Math.abs(x - o.x) < o.r * 1.3 && Math.abs(y - o.y) < o.r * 1.3) {
+      const d = Math.hypot(x - o.x, y - o.y) / (o.r * (0.75 + noise(x / 30, y / 30, seed + 5) * 0.5));
+      if (d < 1) e += o.top * (1 - d * d) ** 1.5;
+    }
     elev[k] = e; ground[k] = e < -0.07 ? DEEP : e < 0 ? WATER : e < 0.035 ? SAND : e < MOUNT ? GRASS : e < MOUNT + 0.12 ? ROCK : SNOW;
   }
   const w = { seed, rand, elev, ground, objects: [], food: [], fish: [], buckets: new Map(), time: 0 };
@@ -49,8 +60,14 @@ export function makeWorld(seed = 7) {
     if (d > 220 && d < best && at(x, y) === ROCK && at(x, y + 24) <= ROCK && at(x, y + 24) >= GRASS) { best = d; nest.x = x; nest.y = y; }
   }
   if (best === Infinity) { nest.x = vx + 260; nest.y = vy - 160; }
-  add(w, { art: 'crag', x: nest.x, y: nest.y, block: { r: 16 }, nest: true });
+  add(w, { art: 'crag', x: nest.x, y: nest.y, block: { r: 16 }, nest: true, perch: true });
   w.nest = nest;
+  // lone rocks in the sea, near the island and far out: places to land and rest a while (not to sleep)
+  for (let n = 0, made = 0; n < 800 && made < 12; n++) {
+    const x = Math.round(-SEA * 0.8 + rand() * (W + SEA * 1.6)), y = Math.round(-SEA * 0.8 + rand() * (H + SEA * 1.6));
+    const open = [0, 1, 2, 3, 4, 5].every((k) => terrain(w, x + Math.cos(k * 1.05) * 30, y + Math.sin(k * 1.05) * 30) === DEEP);
+    if (open && Math.hypot(x - W / 2, y - H / 2) < W * 0.85 && w.objects.every((o) => !o.perch || Math.hypot(o.x - x, o.y - y) > 380)) { add(w, { art: 'crag', x, y, block: { r: 16 }, perch: true }); made++; }
+  }
   // farms here and there; woods where a second noise says so, a tree or bush now and then elsewhere
   for (let n = 0; n < 8; n++) {
     const x = 80 + rand() * (W - 160), y = 80 + rand() * (H - 160);
@@ -111,19 +128,40 @@ function spot(w, it, ok) {
   }
   it.x = w.village?.x ?? W / 2; it.y = w.village?.y ?? H / 2; return it;
 }
-export const FOOD = { mouse: 14, beetle: 6, worm: 5 };
+export const FOOD = { mouse: 25, beetle: 12, worm: 10, fish: 35 }; // (energy, eaten)
+const SPEED = { mouse: 34, beetle: 14, worm: 4 }; // (running away)
+const fits = (kind) => (t) => t === GRASS || (kind === 'beetle' && (t === SAND || t === ROCK));
 function placeFood(w, f) {
   const r = w.rand();
   f.kind = r < 0.3 ? 'mouse' : r < 0.65 ? 'beetle' : 'worm';
-  f.gone = 0;
-  return spot(w, f, (t) => t === GRASS || (f.kind === 'beetle' && (t === SAND || t === ROCK)));
+  f.gone = 0; f.a = w.rand() * 6.3; f.run = 0; f.scare = 0;
+  return spot(w, f, fits(f.kind));
 }
-export function eat(w, f) { f.gone = 15 + w.rand() * 20; return FOOD[f.kind]; }
+// a perch (a rock's flat top) within r of (x, y)
+export const perchNear = (w, x, y, r) => near(w, x, y, (o) => o.perch && Math.hypot(o.x - x, o.y - y) < r);
+// snatching what is within r of (x, y): a mouse, beetle, worm or a fish (gone for a while, elsewhere); what it was
+export function snatch(w, x, y, r) {
+  const f = w.food.find((f) => f.gone <= 0 && Math.hypot(f.x - x, f.y - y) < r);
+  if (f) { f.gone = 15 + w.rand() * 20; return f.kind; }
+  const g = w.fish.find((f) => f.t <= 0 && Math.hypot(f.x - x, f.y - y) < r);
+  if (g) { g.t = 20; return 'fish'; }
+  return null;
+}
 
-// time going by: eaten food comes back elsewhere, fish swim about (turning back at the shore)
-export function update(w, dt) {
+// time going by: the eagle (b) near and low, what lies about startles and runs off; caught, it comes back elsewhere;
+// fish swim about (turning back at the shore)
+export function update(w, dt, b) {
   w.time += dt;
-  for (const f of w.food) if (f.gone > 0 && (f.gone -= dt) <= 0) placeFood(w, f);
+  for (const f of w.food) {
+    if (f.gone > 0) { if ((f.gone -= dt) <= 0) placeFood(w, f); continue; }
+    if (b && f.run <= 0 && f.scare <= 0 && b.z < 30 && Math.hypot(f.x - b.x, f.y - b.y) < 55) f.scare = 0.25;
+    if (f.scare > 0 && (f.scare -= dt) <= 0 && b) { f.run = 1.5; f.a = Math.atan2(f.y - b.y, f.x - b.x) + (w.rand() - 0.5); }
+    const v = f.run > 0 ? SPEED[f.kind] : f.kind === 'worm' ? 0.5 : 2;
+    if (f.run > 0) f.run -= dt;
+    f.a += (w.rand() - 0.5) * (f.run > 0 ? 3 : 5) * dt;
+    const nx = f.x + Math.cos(f.a) * v * dt, ny = f.y + Math.sin(f.a) * v * dt;
+    if (fits(f.kind)(terrain(w, nx, ny)) && !blocked(w, nx, ny)) { f.x = nx; f.y = ny; } else f.a += Math.PI * (0.5 + w.rand());
+  }
   for (const f of w.fish) {
     if (f.t > 0) { if ((f.t -= dt) <= 0) spot(w, f, (t) => t === WATER || t === DEEP); continue; }
     f.a += (w.rand() - 0.5) * 2 * dt;

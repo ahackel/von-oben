@@ -21,7 +21,7 @@ function sky() {
   return [mix(c0, c1, e), d0 + (d1 - d0) * e];
 }
 globalThis.vonOben = { bird, world, setDay: (d) => (day = d) }; // (to look into, from the console)
-const ZOOM_GROUND = 4, ZOOM_AIR = 1.5, VERSION = 'V5'; // (on the title: is the new code there?)
+const ZOOM_GROUND = 4, ZOOM_AIR = 1.5, VERSION = 'V6'; // (on the title: is the new code there?)
 
 function resize() {
   dpr = window.devicePixelRatio || 1; cw = cv.width = Math.round(innerWidth * dpr); ch = cv.height = Math.round(innerHeight * dpr);
@@ -100,7 +100,7 @@ function input(dt) { // (keys too: ←→ turn; ↑ held climbs the pace, slowly
 function frame(now) {
   requestAnimationFrame(frame); // (first: an error in one frame doesn't stop the game)
   const dt = Math.max(0, Math.min(0.05, (now - last) / 1000)); last = now; // (the first frame's time can be before the script ran)
-  update(world, dt);
+  update(world, dt, started ? bird : null);
   if (started) step(bird, input(dt), dt, world);
   day = (day + (dt * (bird.asleep ? 12 : 1)) / DAY) % 1;
   for (const e of bird.events.splice(0)) particles.push({ ...e, t: 0 });
@@ -142,12 +142,19 @@ function draw() {
     ctx.fillRect(Math.round(f.x) - (across ? 3 : 1), Math.round(f.y) - (across ? 1 : 3), across ? 6 : 2, across ? 2 : 6);
   }
   for (const f of world.food) if (f.gone <= 0 && f.x > x0 && f.x < x1 && f.y > y0 && f.y < y1) {
-    const s = ART[f.kind]; s.draw(ctx, f.x - s.w / 2 + (f.kind === 'worm' && Math.sin(t * 4 + f.x) > 0 ? 1 : 0), f.y - s.h + 1);
+    const s = ART[f.kind], hop = f.run > 0 && f.kind === 'mouse' && Math.sin(t * 30 + f.x) > 0 ? 1 : 0; // (running: a scurry)
+    s.draw(ctx, Math.round(f.x - s.w / 2 + (f.kind === 'worm' && Math.sin(t * 4 + f.x) > 0 ? 1 : 0)), Math.round(f.y - s.h + 1 - hop), Math.cos(f.a) > 0);
   }
   // shadows, then all that stands, back to front (the eagle among it, or over it all when high)
   const seen = world.objects.filter((o) => o.x > x0 && o.x < x1 && o.y > y0 && o.y < y1);
   ctx.fillStyle = 'rgba(30,40,70,0.22)';
   for (const o of seen) { ctx.beginPath(); ctx.ellipse(o.x + 2, o.y, o.block.w ? 18 : 6, o.block.w ? 4 : 2.5, 0, 0, Math.PI * 2); ctx.fill(); }
+  for (const o of seen) if (o.perch && isWater(world, o.x, o.y)) { // (a rock in the sea: the water foaming round its foot)
+    const f = (t * 0.5 + hash(o.x, o.y, 2)) % 1;
+    ctx.strokeStyle = `rgba(253,251,246,${0.8 * (1 - f)})`; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.ellipse(o.x, o.y - 1, 23 + f * 12, 6 + f * 4, 0, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle = 'rgba(30,40,70,0.22)';
+  }
   if (bird.state !== 'dive' && !(bird.state === 'ground' && bird.z > 0)) {
     const s = 1 - (bird.z / CRUISE) * 0.45; ctx.beginPath(); ctx.ellipse(bird.x + bird.z * 0.3, bird.y + bird.z * 0.15, 6 * s, 2.5 * s, 0, 0, Math.PI * 2); ctx.fill();
   }
@@ -174,6 +181,16 @@ function draw() {
       }
     }
   }
+  // flying: what can be caught blinks, a pixel each, to be seen from up there
+  if (bird.state === 'air' && bird.z > 20) {
+    const a = Math.min(1, (bird.z - 20) / 30), q = 4;
+    for (const f of [...world.food.filter((f) => f.gone <= 0), ...world.fish.filter((f) => f.t <= 0)]) {
+      if (f.x < x0 || f.x > x1 || f.y < y0 || f.y > y1 || Math.sin(t * 7 + f.x * 0.37 + f.y) < 0) continue;
+      const px = Math.round(f.x) - 2, py = Math.round(f.y) - 3;
+      ctx.fillStyle = `rgba(43,37,65,${a * 0.8})`; ctx.fillRect(px - 1, py - 1, q + 2, q + 2);
+      ctx.fillStyle = f.kind ? `rgba(255,226,90,${a})` : `rgba(253,251,246,${a})`; ctx.fillRect(px, py, q, q);
+    }
+  }
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   if (bird.state === 'dive') { ctx.fillStyle = 'rgba(40,70,130,0.3)'; ctx.fillRect(0, 0, cw, ch); }
   hud(S, camx, camy);
@@ -183,7 +200,10 @@ function drawBird() {
   const pic = eagle(poseOf(bird), bird.a), x = Math.round(bird.x), y = Math.round(bird.y - bird.z);
   if (bird.state === 'swim') { ctx.strokeStyle = 'rgba(253,251,246,0.7)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.ellipse(x, y, 9 + Math.sin(world.time * 3), 3.5, 0, 0, Math.PI * 2); ctx.stroke(); }
   ctx.drawImage(pic.canvas, x - pic.ox, y - pic.oy);
-  if (bird.carry > 0 && bird.state !== 'dive') { const [bx, by] = beak(bird.a); ART.fish.draw(ctx, x + bx - 3, y + by - 1, Math.cos(bird.a) > 0); }
+  if (bird.prey && bird.state !== 'dive' && !(bird.state === 'swim' && bird.prey === 'fish')) { // (in its claws; eating: at its beak)
+    const s = ART[bird.prey], [bx, by] = bird.eating > 0 ? beak(bird.a) : [0, bird.state === 'air' ? 3 : 0];
+    s.draw(ctx, Math.round(x + bx - s.w / 2), Math.round(y + by - s.h / 2), Math.cos(bird.a) > 0);
+  }
 }
 
 function hud(S, camx, camy) {
@@ -195,15 +215,16 @@ function hud(S, camx, camy) {
   ctx.fillStyle = HEX.charcoal; ctx.fillRect(pad + u, pad + u * 8, bw, u * 4);
   ctx.fillStyle = col; ctx.fillRect(pad + u, pad + u * 8, Math.round(bw * e), u * 4);
   ctx.fillStyle = tone(col, 'light'); ctx.fillRect(pad + u, pad + u * 8, Math.round(bw * e), u);
-  if (bird.energy < 20 && Math.sin(world.time * 8) > 0) text(ctx, bird.state === 'air' ? 'HUNGER! LANDEN!' : 'HUNGER!', pad, pad + u * 15, HEX.red, 'left', u);
-  // fish caught
-  const n = `${bird.fish}`, fx = cw - pad - textWidth(n) * u;
+  if (bird.energy < 20 && Math.sin(world.time * 8) > 0) text(ctx, bird.state === 'air' ? 'HUNGER! JAGEN!' : 'HUNGER!', pad, pad + u * 15, HEX.red, 'left', u);
+  if (bird.prey && bird.state !== 'ground') text(ctx, 'ZUM FRESSEN AN LAND', pad, pad + u * 23, HEX.yellow, 'left', u);
+  // prey eaten
+  const n = `${bird.caught}`, fx = cw - pad - textWidth(n) * u;
   text(ctx, n, fx, pad, HEX.white, 'left', u);
-  ctx.save(); ctx.translate(fx - u * 11, pad); ctx.scale(u, u); ART.fish.draw(ctx, 0, 0); ctx.restore();
-  // what happened: risen numbers where it ate
-  for (const p of particles) if (p.value) {
+  ctx.save(); ctx.translate(fx - u * 10, pad); ctx.scale(u, u); ART.mouse.draw(ctx, 0, 0); ctx.restore();
+  // what happened: risen words where it caught something, numbers where it ate
+  for (const p of particles) if (p.value || p.type === 'catch') {
     const sx = cw / 2 + (p.x - camx) * S, sy = ch / 2 + (p.y - camy - 8) * S - p.t * 30 * u;
-    text(ctx, p.type === 'fish' ? `FISCH! +${p.value}` : `+${p.value}`, sx, sy, p.type === 'fish' ? HEX.yellow : HEX.white, 'center', u);
+    text(ctx, p.value ? `+${p.value}` : p.kind === 'fish' ? 'FISCH!' : 'GEFANGEN!', sx, sy, p.value ? HEX.white : HEX.yellow, 'center', u);
   }
   for (const p of particles) if (p.type === 'miss' && p.t < 0.9) text(ctx, 'NICHTS...', cw / 2, ch / 2 - 30 * u, HEX.white, 'center', u);
   if (bird.asleep) for (let i = 0; i < 3; i++) { // (asleep: Z z z rising)
@@ -228,6 +249,7 @@ function sticksDraw(u) {
     if (across) continue;
     const marks = [[FLY_AT + 0.15, 'FLIEGEN'], [0.52, 'RENNEN'], [0.18, 'GEHEN'], [-0.15, 'STOP']], lu = Math.max(2, Math.round(u * 0.7));
     if (bird.state === 'swim' || bird.state === 'dive') marks.push([-0.8, 'TAUCHEN']);
+    if (bird.state === 'air') marks.push([-0.8, 'STURZFLUG']);
     for (const [v, label] of marks) text(ctx, label, hx - r * 0.45, hy - v * r - lu * 2.5, 'rgba(253,251,246,0.85)', 'right', lu);
   }
 }
@@ -237,7 +259,7 @@ function title(u) {
   const big = u * 4;
   text(ctx, 'VON OBEN', cw / 2 + big / 2, ch * 0.3 + big / 2, tone(HEX.charcoal, 'line'), 'center', big);
   text(ctx, 'VON OBEN', cw / 2, ch * 0.3, HEX.white, 'center', big);
-  const lines = ['LINKS: DREHEN', 'RECHTS: GEHEN, RENNEN, FLIEGEN', 'LOSLASSEN: LANDEN', 'IM MEER NACH UNTEN: TAUCHEN', '', 'FLIEGEN KOSTET ENERGIE.', 'FRISS MÄUSE, KÄFER, WÜRMER UND FISCHE!', 'IM NEST AUF DEM FELSEN SCHLAFEN: VOLLE ENERGIE', '', 'TIPPEN ZUM STARTEN'];
+  const lines = ['LINKS: DREHEN', 'RECHTS: GEHEN, RENNEN, FLIEGEN', 'LOSLASSEN: LANDEN', 'IM FLUG NACH UNTEN: STURZFLUG', '', 'FLIEGEN KOSTET ENERGIE.', 'JAGE MÄUSE, KÄFER, WÜRMER UND FISCHE IM STURZFLUG!', 'GEFRESSEN WIRD AN LAND.', 'IM NEST AUF DEM FELSEN SCHLAFEN: VOLLE ENERGIE', '', 'TIPPEN ZUM STARTEN'];
   text(ctx, VERSION, cw - u * 4, ch - u * 10, HEX.white, 'right', u);
   lines.forEach((l, i) => text(ctx, l, cw / 2, ch * 0.3 + big * 9 + i * Math.round(u * 1.5) * 9, i === lines.length - 1 && Math.sin(world.time * 4) < 0 ? HEX.yellow : HEX.white, 'center', Math.round(u * 1.5)));
 }
