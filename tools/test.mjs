@@ -1,7 +1,7 @@
 // npm test: the island and the eagle without a screen: there is land and sea, a village; the eagle takes off, flies,
 // gets tired, glides down and lands when let go; it can't walk through a house; it eats; it swims, dives and (with luck) catches a fish.
 import assert from 'node:assert/strict';
-import { makeWorld, update, terrain, isWater, blocked, W, H, GRASS, ROCK, DEEP, PERCH } from '../src/world.js';
+import { makeWorld, update, setWeather, terrain, isWater, blocked, W, H, GRASS, ROCK, DEEP, PERCH } from '../src/world.js';
 import { makeBird, step, CRUISE } from '../src/bird.js';
 
 const w = makeWorld();
@@ -82,8 +82,8 @@ assert.ok(isles > 0, 'small islands');
 const pg = w.food.find((f) => f.gone <= 0), gb = makeBird(pg.x - 4, pg.y); gb.a = 0; run(gb, { push: 0.1 }, 0.3);
 assert.ok(gb.prey, 'grabbed on foot');
 // flying near prey a while: fixed on it; stooping, it gets it, though it starts off to one side
-const pt = w.food.find((f) => f.gone <= 0 && f.kind === 'beetle'), fb = makeBird(pt.x + 40, pt.y + 20, 60); fb.state = 'air'; fb.v = 0;
-for (let n = 0; n < 90 && !fb.target; n++) { fb.x = pt.x + 40; fb.y = pt.y + 20; fb.z = 60; step(fb, { push: 0.75 }, 1 / 60, w); }
+const pt = w.food.find((f) => f.gone <= 0 && f.kind === 'beetle'), fb = makeBird(pt.x + 12, pt.y + 6, 60); fb.state = 'air'; fb.v = 0;
+for (let n = 0; n < 90 && !fb.target; n++) { fb.x = pt.x + 12; fb.y = pt.y + 6; fb.z = 60; step(fb, { push: 0.75 }, 1 / 60, w); }
 assert.equal(fb.target, pt, 'fixed on the beetle');
 for (let n = 0; n < 120 && !fb.prey; n++) { update(w, 1 / 60, fb); step(fb, { push: -1 }, 1 / 60, w); }
 assert.equal(fb.prey, 'beetle', 'stooped on it, caught it');
@@ -97,6 +97,13 @@ for (let n = 0; n < 90 && !hb.target; n++) { hb.x = w.nest.x + 50; hb.y = w.nest
 assert.ok(hb.target?.nest, 'fixed on the nest');
 run(hb, { push: -1 }, 1.5);
 assert.ok(hb.state === 'ground' && hb.z === PERCH && hb.perch?.nest, 'stooped into the nest');
+// the weather: rain brings out worms and frogs
+{
+  setWeather(w, 'rain');
+  for (let n = 0; n < 600; n++) update(w, 1 / 20);
+  const out = w.food.filter((f) => f.gone <= 0), wet = out.filter((f) => f.kind === 'worm' || f.kind === 'frog').length;
+  assert.ok(wet > out.length * 0.6, `rain: worms and frogs (${wet}/${out.length})`);
+}
 // out to sea, beyond the island's map
 const o = makeBird(W - 20, H / 2, CRUISE); o.state = 'air'; o.v = 90; o.a = 0; run(o, { push: 1 }, 10);
 assert.ok(o.x > W + 300 && o.state === 'air', 'far out over the sea');

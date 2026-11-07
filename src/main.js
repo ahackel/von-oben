@@ -2,7 +2,7 @@
 // to it on the ground, farther away the higher it flies. Two sticks: the left turns it, the right sets its pace.
 import { HEX, tone, mix } from './pixels.js';
 import { text, textWidth } from '../lib/font.js';
-import { makeWorld, update, terrain, elevation, hash, isWater, W, H, DEEP, WATER, SAND, GRASS, ROCK, SNOW, PERCH } from './world.js';
+import { makeWorld, update, setWeather, terrain, elevation, hash, isWater, W, H, DEEP, WATER, SAND, GRASS, ROCK, SNOW, PERCH } from './world.js';
 import { makeBird, step, CRUISE, FLY_AT } from './bird.js';
 import { eagle, poseOf, beak } from './eagle.js';
 import { ART, HOUSE_LIGHTS } from './art/island.js';
@@ -16,12 +16,22 @@ const particles = [], wake = [], keys = new Set(); // (wake: where it swam, the 
 const DAY = 240, SKY = [[0, '#ffffff', 0], [0.42, '#ffffff', 0], [0.5, mix('#ffffff', '#ff8c5a', 0.55), 0.15], [0.56, '#a088c4', 0.6],
   [0.62, '#55609e', 1], [0.85, '#55609e', 1], [0.92, mix('#ffffff', '#ffb4c4', 0.5), 0.25], [1, '#ffffff', 0]];
 let day = 0.08;
+// the weather: each day (from the morning) another; what it is called, which animals it brings out
+const WEATHERS = ['sun', 'rain', 'fog', 'wind'], SAY = { sun: ['SONNE', 'EIDECHSEN SONNEN SICH'], rain: ['REGEN', 'WÜRMER UND FRÖSCHE KOMMEN RAUS'],
+  fog: ['NEBEL', 'DIE MÄUSE WAGEN SICH RAUS'], wind: ['WIND', 'KÄFER KRABBELN, DER WIND TREIBT DICH AB'] };
+let dayN = 1, wfade = 1, banner = 0;
+function newDay() {
+  dayN++;
+  let k = WEATHERS[Math.floor(hash(dayN, 7, 9) * WEATHERS.length)];
+  if (k === world.weather) k = WEATHERS[(WEATHERS.indexOf(k) + 1) % WEATHERS.length];
+  setWeather(world, k); wfade = 0; banner = 6;
+}
 function sky() {
   const i = SKY.findIndex(([at]) => at > day), [a0, c0, d0] = SKY[i - 1], [a1, c1, d1] = SKY[i], f = (day - a0) / (a1 - a0), e = f * f * (3 - 2 * f);
   return [mix(c0, c1, e), d0 + (d1 - d0) * e];
 }
-globalThis.vonOben = { bird, world, setDay: (d) => (day = d) }; // (to look into, from the console)
-const ZOOM_GROUND = 4, ZOOM_AIR = 1.5, VERSION = 'V9'; // (on the title: is the new code there?)
+globalThis.vonOben = { bird, world, setDay: (d) => (day = d), newDay }; // (to look into, from the console)
+const ZOOM_GROUND = 4, ZOOM_AIR = 1.5, VERSION = 'V10'; // (on the title: is the new code there?)
 
 function resize() {
   dpr = window.devicePixelRatio || 1; cw = cv.width = Math.round(innerWidth * dpr); ch = cv.height = Math.round(innerHeight * dpr);
@@ -102,7 +112,10 @@ function frame(now) {
   const dt = Math.max(0, Math.min(0.05, (now - last) / 1000)); last = now; // (the first frame's time can be before the script ran)
   update(world, dt, started ? bird : null);
   if (started) step(bird, input(dt), dt, world);
+  const was = day;
   day = (day + (dt * (bird.asleep ? 12 : 1)) / DAY) % 1;
+  if (was < 0.95 && day >= 0.95) newDay();
+  wfade = Math.min(1, wfade + dt / 6); banner = Math.max(0, banner - dt);
   for (const e of bird.events.splice(0)) {
     particles.push({ ...e, t: 0 });
     if (e.type === 'splash') for (let i = 0; i < 14; i++) { const a = Math.random() * Math.PI * 2, s = 10 + Math.random() * 25; particles.push({ type: 'drop', x: e.x, y: e.y, vx: Math.cos(a) * s, vy: Math.sin(a) * s * 0.6, vz: 30 + Math.random() * 45, t: 0 }); }
@@ -196,6 +209,13 @@ function draw() {
       }
     }
   }
+  // rain: rings on the water where the drops fall
+  if (world.weather === 'rain') for (let i = 0; i < 60; i++) {
+    const ph = t * 1.4 + hash(i, 2, 11), k = Math.floor(ph), p = ph - k, x = Math.round(x0 + hash(i, k, 12) * (x1 - x0)), y = Math.round(y0 + hash(i, k, 13) * (y1 - y0));
+    if (!isWater(world, x, y)) continue;
+    ctx.strokeStyle = `rgba(253,251,246,${0.6 * (1 - p) * wfade})`; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.ellipse(x, y, 1 + p * 4, 0.5 + p * 1.6, 0, 0, Math.PI * 2); ctx.stroke();
+  }
   // flying: what can be caught blinks, a pixel each, to be seen from up there
   if (bird.state === 'air' && bird.z > 20) {
     const a = Math.min(1, (bird.z - 20) / 30), q = 4;
@@ -214,8 +234,45 @@ function draw() {
     for (const [sx, sy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) { ctx.fillRect(x + sx * r - (sx > 0 ? 3 : 0), y + sy * r - (sy > 0 ? 1 : 0), 4, 1); ctx.fillRect(x + sx * r - (sx > 0 ? 1 : 0), y + sy * r - (sy > 0 ? 3 : 0), 1, 4); }
   }
   ctx.setTransform(1, 0, 0, 1, 0, 0);
+  weather(S);
   if (bird.state === 'dive') { ctx.fillStyle = 'rgba(40,70,130,0.3)'; ctx.fillRect(0, 0, cw, ch); }
   hud(S, camx, camy);
+}
+
+// the weather over it all, on the screen: rain falling, fog drifting, the wind blowing streaks and leaves along
+function weather(S) {
+  const t = world.time, f = wfade, u = Math.max(2, Math.round(Math.min(cw, ch) / 170)), wk = world.weather;
+  if (wk === 'rain') {
+    ctx.fillStyle = `rgba(60,70,110,${0.2 * f})`; ctx.fillRect(0, 0, cw, ch);
+    ctx.strokeStyle = `rgba(200,215,240,${0.55 * f})`; ctx.lineWidth = Math.max(1, u / 2); ctx.beginPath();
+    for (let i = 0; i < 150; i++) {
+      const h = hash(i, 0, 11), y = (hash(i, 1, 11) * ch + t * ch * (1.3 + h * 0.5)) % (ch + 40) - 20, x = (h * cw * 1.3 + y * 0.2) % cw;
+      ctx.moveTo(x, y); ctx.lineTo(x + u * 1.5, y + u * 7);
+    }
+    ctx.stroke();
+  } else if (wk === 'fog') {
+    ctx.fillStyle = `rgba(225,230,238,${(0.3 + 0.25 * Math.min(1, bird.z / CRUISE)) * f})`; ctx.fillRect(0, 0, cw, ch);
+    const r = Math.max(cw, ch) * 0.45;
+    for (let i = 0; i < 6; i++) {
+      const x = ((hash(i, 0, 14) * cw * 1.8 + t * 12 * u * (0.6 + hash(i, 1, 14))) % (cw * 1.8)) - cw * 0.4, y = hash(i, 2, 14) * ch;
+      const g = ctx.createRadialGradient(x, y, 0, x, y, r); g.addColorStop(0, `rgba(240,243,248,${0.45 * f})`); g.addColorStop(1, 'rgba(240,243,248,0)');
+      ctx.fillStyle = g; ctx.fillRect(x - r, y - r, r * 2, r * 2);
+    }
+  } else if (wk === 'wind') {
+    const a = Math.atan2(world.wind.y, world.wind.x), ca = Math.cos(a), sa = Math.sin(a), W2 = cw + 200, H2 = ch + 200;
+    ctx.strokeStyle = `rgba(253,251,246,${0.35 * f})`; ctx.lineWidth = Math.max(1, u / 2); ctx.beginPath();
+    for (let i = 0; i < 40; i++) {
+      const s = t * 260 * u * (0.7 + hash(i, 0, 15) * 0.6), x = (((hash(i, 1, 15) * W2 + ca * s) % W2) + W2) % W2 - 100, y = (((hash(i, 2, 15) * H2 + sa * s) % H2) + H2) % H2 - 100;
+      ctx.moveTo(x, y); ctx.lineTo(x + ca * u * 14, y + sa * u * 14);
+    }
+    ctx.stroke();
+    for (let i = 0; i < 18; i++) { // (leaves, tumbling)
+      const s = t * 140 * u * (0.7 + hash(i, 3, 15) * 0.6), x = (((hash(i, 4, 15) * W2 + ca * s) % W2) + W2) % W2 - 100, y = (((hash(i, 5, 15) * H2 + sa * s) % H2) + H2) % H2 - 100 + Math.sin(t * 5 + i) * u * 4;
+      ctx.fillStyle = [HEX.lightGreen, HEX.ochre, HEX.green][i % 3]; ctx.globalAlpha = f;
+      ctx.fillRect(Math.round(x), Math.round(y), u * (1 + (Math.sin(t * 9 + i) > 0)), u);
+      ctx.globalAlpha = 1;
+    }
+  }
 }
 
 function drawBird() {
@@ -257,13 +314,21 @@ function hud(S, camx, camy) {
   const nx = cw / 2 + (world.nest.x - camx) * S, ny = ch / 2 + (world.nest.y - PERCH - camy) * S, m = u * 14;
   if (started && (nx < 0 || ny < 0 || nx > cw || ny > ch)) {
     const dx = nx - cw / 2, dy = ny - ch / 2, k = Math.min((cw / 2 - m) / Math.abs(dx || 1e-6), (ch / 2 - m) / Math.abs(dy || 1e-6));
-    const ax = cw / 2 + dx * k, ay = ch / 2 + dy * k, a = Math.atan2(dy, dx);
+    const ax = cw / 2 + dx * k, ay = Math.max(u * 26, ch / 2 + dy * k), a = Math.atan2(dy, dx); // (below the day's name, at the top)
     ctx.save(); ctx.translate(ax, ay); ctx.rotate(a);
     ctx.fillStyle = HEX.yellow; ctx.strokeStyle = tone(HEX.charcoal, 'line'); ctx.lineWidth = u;
     ctx.beginPath(); ctx.moveTo(u * 8, 0); ctx.lineTo(-u * 4, -u * 6); ctx.lineTo(-u * 1, 0); ctx.lineTo(-u * 4, u * 6); ctx.closePath(); ctx.stroke(); ctx.fill();
     ctx.restore();
     const n = ART.nest, q = Math.max(1, Math.round(u / 2));
     ctx.save(); ctx.translate(Math.round(ax - Math.cos(a) * u * 14 - (n.w * q) / 2), Math.round(ay - Math.sin(a) * u * 12 - (n.h * q) / 2)); ctx.scale(q, q); n.draw(ctx, 0, 0); ctx.restore();
+  }
+  // the day and its weather; a new day: what it brings
+  const [wname, wsay] = SAY[world.weather];
+  text(ctx, `TAG ${dayN}: ${wname}`, cw / 2, pad, HEX.white, 'center', u);
+  if (banner > 0 && started) {
+    const a = Math.min(1, banner, 6 - banner), big = u * 2;
+    text(ctx, `TAG ${dayN}: ${wname}`, cw / 2, ch * 0.22, `rgba(253,251,246,${a})`, 'center', big);
+    text(ctx, wsay, cw / 2, ch * 0.22 + big * 9, `rgba(255,226,90,${a})`, 'center', u);
   }
   if (bird.asleep) for (let i = 0; i < 3; i++) { // (asleep: Z z z rising)
     const f = (world.time * 0.6 + i / 3) % 1;
@@ -297,7 +362,7 @@ function title(u) {
   const big = u * 4;
   text(ctx, 'VON OBEN', cw / 2 + big / 2, ch * 0.3 + big / 2, tone(HEX.charcoal, 'line'), 'center', big);
   text(ctx, 'VON OBEN', cw / 2, ch * 0.3, HEX.white, 'center', big);
-  const lines = ['LINKS: DREHEN', 'RECHTS: GEHEN, RENNEN, FLIEGEN', 'LOSLASSEN: LANDEN', 'IM FLUG NACH UNTEN: STURZFLUG', '', 'FLIEGEN KOSTET ENERGIE.', 'JAGE MÄUSE, KÄFER, WÜRMER UND FISCHE IM STURZFLUG!', 'GEFRESSEN WIRD AN LAND.', 'IM NEST AUF DEM FELSEN SCHLAFEN: VOLLE ENERGIE', '', 'TIPPEN ZUM STARTEN'];
+  const lines = ['LINKS: DREHEN', 'RECHTS: GEHEN, RENNEN, FLIEGEN', 'LOSLASSEN: LANDEN', 'IM FLUG NACH UNTEN: STURZFLUG', '', 'FLIEGEN KOSTET ENERGIE.', 'JAGE MÄUSE, KÄFER, WÜRMER UND FISCHE IM STURZFLUG!', 'GEFRESSEN WIRD AN LAND.', 'IM NEST AUF DEM FELSEN SCHLAFEN: VOLLE ENERGIE', 'JEDES WETTER LOCKT ANDERE TIERE HERAUS.', '', 'TIPPEN ZUM STARTEN'];
   text(ctx, VERSION, cw - u * 4, ch - u * 10, HEX.white, 'right', u);
   lines.forEach((l, i) => text(ctx, l, cw / 2, ch * 0.3 + big * 9 + i * Math.round(u * 1.5) * 9, i === lines.length - 1 && Math.sin(world.time * 4) < 0 ? HEX.yellow : HEX.white, 'center', Math.round(u * 1.5)));
 }

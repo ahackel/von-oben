@@ -60,6 +60,7 @@ export function step(b, { turn = 0, push = 0 }, dt, w) {
     b.stooping = stoop;
     if (fly) { b.z = toward(b.z, CRUISE, 40 * dt); b.v = toward(b.v, TAKEOFF + (FAST - TAKEOFF) * Math.min(1, (push - FLY_AT) / (1 - FLY_AT)), 30 * dt); cost = b.z < CRUISE ? 4 : 2.5; }
     else { b.z -= (stoop ? STOOP : 28) * dt; b.v = toward(b.v, GLIDE, 20 * dt); cost = 0.5; }
+    b.x += w.wind.x * dt * Math.min(1, b.z / 30); b.y += w.wind.y * dt * Math.min(1, b.z / 30); // (the wind carrying it, up high)
     b.flap += dt; b.flapping = fly; b.climbing = fly && b.z < CRUISE;
     if (stoop && b.target) { // (stooping on it: headed at it, as fast as reaches it as it comes down)
       const dx = b.target.x - b.x, dy = b.target.y - b.y, d = Math.hypot(dx, dy), down = b.z - (nest(b.target) ? PERCH : 0);

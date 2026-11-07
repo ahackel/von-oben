@@ -36,7 +36,7 @@ export function makeWorld(seed = 7) {
     }
     elev[k] = e; ground[k] = e < -0.07 ? DEEP : e < 0 ? WATER : e < 0.035 ? SAND : e < MOUNT ? GRASS : e < MOUNT + 0.12 ? ROCK : SNOW;
   }
-  const w = { seed, rand, elev, ground, objects: [], food: [], fish: [], buckets: new Map(), time: 0 };
+  const w = { seed, rand, elev, ground, objects: [], food: [], fish: [], buckets: new Map(), time: 0, weather: 'sun', wind: { x: 0, y: 0 } };
   const at = (x, y) => terrain(w, x, y);
   // the village: a street of paths through the grass nearest the middle, houses along it, a fountain on it
   let vx = W / 2, vy = H / 2;
@@ -128,12 +128,27 @@ function spot(w, it, ok) {
   }
   it.x = w.village?.x ?? W / 2; it.y = w.village?.y ?? H / 2; return it;
 }
-export const FOOD = { mouse: 25, beetle: 12, worm: 10, fish: 35 }; // (energy, eaten)
-const SPEED = { mouse: 34, beetle: 14, worm: 4 }; // (running away)
-const fits = (kind) => (t) => t === GRASS || (kind === 'beetle' && (t === SAND || t === ROCK));
+export const FOOD = { mouse: 25, beetle: 12, worm: 10, lizard: 18, frog: 20, fish: 35 }; // (energy, eaten)
+const SPEED = { mouse: 34, beetle: 14, worm: 4, lizard: 42, frog: 24 }; // (running away)
+const fits = (kind) => (t) => t === GRASS || ((kind === 'beetle' || kind === 'lizard') && (t === SAND || t === ROCK)) || (kind === 'frog' && t === SAND);
+// the weather, a day each: which animals it brings out (how many of each, of all there are)
+export const WEATHER = {
+  sun: { mouse: 0.3, beetle: 0.25, lizard: 0.45 },
+  rain: { worm: 0.5, frog: 0.35, beetle: 0.15 },
+  fog: { mouse: 0.6, worm: 0.2, beetle: 0.2 },
+  wind: { mouse: 0.35, beetle: 0.4, worm: 0.25 },
+};
+// a new day's weather: what lies about now (most of it) hides, other animals come out; the wind (px/s) blowing
+export function setWeather(w, kind) {
+  w.weather = kind;
+  const a = w.rand() * Math.PI * 2;
+  w.wind = kind === 'wind' ? { x: Math.cos(a) * 22, y: Math.sin(a) * 22 } : { x: 0, y: 0 };
+  for (const f of w.food) if (f.gone <= 0 && !(WEATHER[kind][f.kind] > w.rand())) f.gone = 1 + w.rand() * 8;
+}
 function placeFood(w, f) {
-  const r = w.rand();
-  f.kind = r < 0.3 ? 'mouse' : r < 0.65 ? 'beetle' : 'worm';
+  let r = w.rand();
+  f.kind = 'mouse';
+  for (const [k, p] of Object.entries(WEATHER[w.weather])) { f.kind = k; if ((r -= p) < 0) break; }
   f.gone = 0; f.a = w.rand() * 6.3; f.run = 0; f.scare = 0;
   return spot(w, f, fits(f.kind));
 }

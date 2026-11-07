@@ -135,6 +135,8 @@ ROCKS.crag = { keys: STONE, rows: cragRows() };
 
 const SMALL = {
   mouse: { keys: { G: 'grey.light', g: 'grey', s: 'grey.shade', p: 'pink' }, rows: ['.GG......', 'GGGGGG...', 'peGGGGGg.', '.gggggggp', '..s...s..'] }, // (facing left: an ear up, the legs down, its tail out behind)
+  lizard: { keys: { G: 'lightGreen', g: 'green', s: 'green.shade' }, rows: ['.GGG.......', 'GeGGGGgg...', '.s..s..gggg', '..........g'] }, // (facing left: its legs out, a long tail)
+  frog: { keys: { G: 'green', g: 'green.shade', L: 'lightGreen' }, rows: ['.L.L.', 'GeGeG', 'LGGGL', 'ggggg', 'g...g'] },
   beetle: { keys: { G: 'darkGreen.light', g: 'darkGreen', b: 'black' }, rows: ['b.b', 'GGg', 'ggg', 'b.b'] },
   worm: { keys: { P: 'lightPink', p: 'pink', r: 'rose' }, rows: ['.PP..', 'p..pp', '.....'] },
   fish: { keys: { S: 'blueGrey.light', s: 'blueGrey', d: 'blueGrey.shade' }, rows: ['.SSS..S', 'SeSssSs', '.ddd..d'] },
