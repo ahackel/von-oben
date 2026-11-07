@@ -12,7 +12,7 @@ const world = makeWorld(), bird = makeBird(world.village.x - 28, world.village.y
 let cw = 0, ch = 0, dpr = 1, zoom = 4, started = false, last = performance.now(), keyPush = 0;
 const particles = [], keys = new Set();
 globalThis.vonOben = { bird, world }; // (to look into, from the console)
-const ZOOM_GROUND = 4, ZOOM_AIR = 1.7;
+const ZOOM_GROUND = 4, ZOOM_AIR = 1.7, VERSION = 'V4'; // (on the title: is the new code there?)
 
 function resize() {
   dpr = window.devicePixelRatio || 1; cw = cv.width = Math.round(innerWidth * dpr); ch = cv.height = Math.round(innerHeight * dpr);
@@ -182,6 +182,7 @@ function title(u) {
   text(ctx, 'VON OBEN', cw / 2 + big / 2, ch * 0.3 + big / 2, tone(HEX.charcoal, 'line'), 'center', big);
   text(ctx, 'VON OBEN', cw / 2, ch * 0.3, HEX.white, 'center', big);
   const lines = ['LINKS: DREHEN', 'RECHTS: GEHEN, RENNEN, FLIEGEN', 'LOSLASSEN: LANDEN', 'IM MEER NACH UNTEN: TAUCHEN', '', 'FLIEGEN KOSTET ENERGIE.', 'FRISS MÄUSE, KÄFER, WÜRMER UND FISCHE!', '', 'TIPPEN ZUM STARTEN'];
+  text(ctx, VERSION, cw - u * 4, ch - u * 10, HEX.white, 'right', u);
   lines.forEach((l, i) => text(ctx, l, cw / 2, ch * 0.3 + big * 9 + i * Math.round(u * 1.5) * 9, i === lines.length - 1 && Math.sin(world.time * 4) < 0 ? HEX.yellow : HEX.white, 'center', Math.round(u * 1.5)));
 }
 
