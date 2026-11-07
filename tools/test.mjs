@@ -91,6 +91,12 @@ assert.equal(fb.prey, 'beetle', 'stooped on it, caught it');
 const nb = makeBird(w.nest.x + 25, w.nest.y + 10, PERCH + 25); nb.state = 'air'; nb.v = 30; nb.a = Math.PI;
 run(nb, { push: 0 }, 2.5);
 assert.ok(nb.state === 'ground' && nb.z === PERCH && nb.perch?.nest, 'drawn into the nest');
+// flying by the nest a while: fixed on it; stooping, it lands in it
+const hb = makeBird(w.nest.x + 50, w.nest.y + 20, 80); hb.state = 'air'; hb.v = 0;
+for (let n = 0; n < 90 && !hb.target; n++) { hb.x = w.nest.x + 50; hb.y = w.nest.y + 20; hb.z = 80; step(hb, { push: 0.75 }, 1 / 60, w); }
+assert.ok(hb.target?.nest, 'fixed on the nest');
+run(hb, { push: -1 }, 1.5);
+assert.ok(hb.state === 'ground' && hb.z === PERCH && hb.perch?.nest, 'stooped into the nest');
 // out to sea, beyond the island's map
 const o = makeBird(W - 20, H / 2, CRUISE); o.state = 'air'; o.v = 90; o.a = 0; run(o, { push: 1 }, 10);
 assert.ok(o.x > W + 300 && o.state === 'air', 'far out over the sea');

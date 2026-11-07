@@ -50,21 +50,27 @@ export function step(b, { turn = 0, push = 0 }, dt, w) {
   } else { // air
     const was = b.z, stoop = !fly && push < -0.3;
     // flying near prey a while: fixed on it (the nearest), till it is gone or far
-    if (b.target && (!alive(b.target) || b.prey || Math.hypot(b.target.x - b.x, b.target.y - b.y) > LOSE)) b.target = null;
-    if (!b.target && !b.prey) { const p = nearestPrey(w, b.x, b.y, SPOT); b.focus = p ? b.focus + dt : 0; if (b.focus > FOCUS) { b.target = p; b.focus = 0; } }
+    // (or on the nest, near it: carrying prey home, or to sleep)
+    const nest = (t) => t?.nest === true, nestAt = w.objects.find(nest);
+    if (b.target && ((!nest(b.target) && (!alive(b.target) || b.prey)) || Math.hypot(b.target.x - b.x, b.target.y - b.y) > LOSE)) b.target = null;
+    if (!b.target) {
+      const dn = Math.hypot(nestAt.x - b.x, nestAt.y - b.y), q = !b.prey && nearestPrey(w, b.x, b.y, Math.min(SPOT, dn)), p = q || (dn < SPOT ? nestAt : null); // (whichever is nearer)
+      b.focus = p ? b.focus + dt : 0; if (b.focus > FOCUS) { b.target = p; b.focus = 0; }
+    }
     b.stooping = stoop;
     if (fly) { b.z = toward(b.z, CRUISE, 40 * dt); b.v = toward(b.v, TAKEOFF + (FAST - TAKEOFF) * Math.min(1, (push - FLY_AT) / (1 - FLY_AT)), 30 * dt); cost = b.z < CRUISE ? 4 : 2.5; }
     else { b.z -= (stoop ? STOOP : 28) * dt; b.v = toward(b.v, GLIDE, 20 * dt); cost = 0.5; }
     b.flap += dt; b.flapping = fly; b.climbing = fly && b.z < CRUISE;
     if (stoop && b.target) { // (stooping on it: headed at it, as fast as reaches it as it comes down)
-      const dx = b.target.x - b.x, dy = b.target.y - b.y, d = Math.hypot(dx, dy);
-      b.a = Math.atan2(dy, dx); b.v = Math.min(140, d / Math.max(0.05, b.z / STOOP));
+      const dx = b.target.x - b.x, dy = b.target.y - b.y, d = Math.hypot(dx, dy), down = b.z - (nest(b.target) ? PERCH : 0);
+      if (d > 0.5) b.a = Math.atan2(dy, dx);
+      b.v = Math.min(140, d / Math.max(0.05, down / STOOP));
     }
     if (stoop && !b.prey && b.z < 8) {
-      const kind = b.target && Math.hypot(b.target.x - b.x, b.target.y - b.y) < CLAW * 1.5 ? take(w, b.target) : snatch(w, b.x, b.y, CLAW);
+      const kind = b.target && !nest(b.target) && Math.hypot(b.target.x - b.x, b.target.y - b.y) < CLAW * 1.5 ? take(w, b.target) : snatch(w, b.x, b.y, CLAW);
       if (kind) { b.prey = kind; b.target = null; b.events.push({ type: 'catch', kind, x: b.x, y: b.y }); }
     }
-    const near = !fly && !(stoop && b.target) && b.z > PERCH && b.z < PERCH + 30 && perchNear(w, b.x, b.y, HOMING);
+    const near = !fly && !(stoop && b.target && !nest(b.target)) && b.z > PERCH && b.z < PERCH + 30 && perchNear(w, b.x, b.y, HOMING);
     if (near) { const k = Math.min(1, dt * 6); b.x += (near.x - b.x) * k; b.y += (near.y - b.y) * k; } // (gliding down by a rock: drawn onto it)
     const rock = !fly && was > PERCH && b.z <= PERCH && perchNear(w, b.x, b.y, NEST * 1.8);
     if (rock) { b.perch = rock; b.z = PERCH; b.x = rock.x; b.y = rock.y; b.state = 'ground'; b.v = 0; } // (on a rock: it settles in the middle)

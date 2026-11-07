@@ -21,7 +21,7 @@ function sky() {
   return [mix(c0, c1, e), d0 + (d1 - d0) * e];
 }
 globalThis.vonOben = { bird, world, setDay: (d) => (day = d) }; // (to look into, from the console)
-const ZOOM_GROUND = 4, ZOOM_AIR = 1.5, VERSION = 'V7'; // (on the title: is the new code there?)
+const ZOOM_GROUND = 4, ZOOM_AIR = 1.5, VERSION = 'V8'; // (on the title: is the new code there?)
 
 function resize() {
   dpr = window.devicePixelRatio || 1; cw = cv.width = Math.round(innerWidth * dpr); ch = cv.height = Math.round(innerHeight * dpr);
@@ -208,8 +208,8 @@ function draw() {
   }
   // fixed on its prey: brackets round it, closing in
   const g = bird.target;
-  if (g && (g.kind ? g.gone <= 0 : g.t <= 0)) {
-    const r = 7 + Math.sin(t * 8) * 1.5, x = Math.round(g.x), y = Math.round(g.y) - 2;
+  if (g && (g.nest || (g.kind ? g.gone <= 0 : g.t <= 0))) {
+    const r = (g.nest ? 20 : 7) + Math.sin(t * 8) * 1.5, x = Math.round(g.x), y = Math.round(g.y) - (g.nest ? PERCH : 2);
     ctx.fillStyle = HEX.yellow;
     for (const [sx, sy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) { ctx.fillRect(x + sx * r - (sx > 0 ? 3 : 0), y + sy * r - (sy > 0 ? 1 : 0), 4, 1); ctx.fillRect(x + sx * r - (sx > 0 ? 1 : 0), y + sy * r - (sy > 0 ? 3 : 0), 1, 4); }
   }

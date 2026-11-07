@@ -87,7 +87,7 @@ export function makeWorld(seed = 7) {
     else if (r > 0.975) add(w, { art: ['bush', 'bush2', 'bush3'][Math.floor(rand() * 3)], ...at2, block: { r: 4 } });
   }
   for (let n = 0; n < 160; n++) w.food.push(placeFood(w, { gone: 0 }));
-  for (let n = 0; n < 70; n++) { const f = { a: rand() * 6.3, t: 0 }; spot(w, f, (t) => t === WATER || t === DEEP); w.fish.push(f); }
+  for (let n = 0; n < 180; n++) { const f = { a: rand() * 6.3, t: 0 }; spot(w, f, (t) => t === WATER || t === DEEP); w.fish.push(f); }
   return w;
 }
 
