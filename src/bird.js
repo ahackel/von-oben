@@ -6,7 +6,7 @@
 // home, a nest: sitting still in it, it falls asleep and its energy fills up.
 import { W, H, SEA, PERCH, blocked, isWater, perchNear, snatch, take, alive, nearestPrey, FOOD } from './world.js';
 
-export const CRUISE = 90; // (height it flies at)
+export const CRUISE = 90, HIGH = 150; // (the height it flies at; up to, the stick right up: over the clouds)
 const NEST = 10, SLEEP_AFTER = 1, REST = 25; // (how near the nest's middle it sits in it; still how long till asleep; energy a second asleep)
 const WALK = 18, RUN = 40, TAKEOFF = 56, FAST = 95, SWIM = 16, GLIDE = 30, DIVE = 1.1, CATCH = 22, LUCK = 0.55;
 const STOOP = 75, CLAW = 16, EAT = 0.7; // (how fast it falls stooping; how near it snatches; how long eating takes)
@@ -30,7 +30,7 @@ export function step(b, { turn = 0, push = 0 }, dt, w) {
     const t = off ? TAKEOFF + 4 : Math.min(paced(push), swim ? SWIM : RUN);
     b.v = toward(b.v, t, (t > b.v ? (swim ? 30 : 50) : 80) * dt);
     if (off && b.v >= TAKEOFF) b.state = 'air';
-    else if (swim && push < -0.5 && b.wet > 0.5 && !b.prey) { b.state = 'dive'; b.dive = DIVE; b.v *= 0.3; b.events.push({ type: 'splash', x: b.x, y: b.y }); }
+    else if (swim && push < -0.5 && b.wet > 0.5) { b.state = 'dive'; b.dive = DIVE; b.v *= 0.3; b.events.push({ type: 'splash', x: b.x, y: b.y }); }
     cost = swim ? 0.4 : b.v > WALK + 2 ? 0.6 : b.v > 1 ? 0.2 : 0;
     if (!swim && !b.z && !b.prey) { const kind = snatch(w, b.x, b.y, PECK); if (kind) { b.prey = kind; b.events.push({ type: 'catch', kind, x: b.x, y: b.y }); } } // (on foot: grabbed)
     if (!swim && b.prey && b.v < 3) { // (on land, with its prey: eating it)
@@ -58,10 +58,10 @@ export function step(b, { turn = 0, push = 0 }, dt, w) {
       b.focus = p ? b.focus + dt : 0; if (b.focus > FOCUS) { b.target = p; b.focus = 0; }
     }
     b.stooping = stoop;
-    if (fly) { b.z = toward(b.z, CRUISE, 40 * dt); b.v = toward(b.v, TAKEOFF + (FAST - TAKEOFF) * Math.min(1, (push - FLY_AT) / (1 - FLY_AT)), 30 * dt); cost = b.z < CRUISE ? 4 : 2.5; }
+    if (fly) { const top = CRUISE + Math.max(0, (push - 0.85) / 0.15) * (HIGH - CRUISE); b.z = toward(b.z, top, 40 * dt); b.v = toward(b.v, TAKEOFF + (FAST - TAKEOFF) * Math.min(1, (push - FLY_AT) / (1 - FLY_AT)), 30 * dt); cost = b.z < top - 1 ? 4 : 2.5; b.climbing = b.z < top - 1; }
     else { b.z -= (stoop ? STOOP : 28) * dt; b.v = toward(b.v, GLIDE, 20 * dt); cost = 0.5; }
     b.x += w.wind.x * dt * Math.min(1, b.z / 30); b.y += w.wind.y * dt * Math.min(1, b.z / 30); // (the wind carrying it, up high)
-    b.flap += dt; b.flapping = fly; b.climbing = fly && b.z < CRUISE;
+    b.flap += dt; b.flapping = fly; if (!fly) b.climbing = false;
     if (stoop && b.target) { // (stooping on it: headed at it, as fast as reaches it as it comes down)
       const dx = b.target.x - b.x, dy = b.target.y - b.y, d = Math.hypot(dx, dy), down = b.z - (nest(b.target) ? PERCH : 0);
       if (d > 0.5) b.a = Math.atan2(dy, dx);

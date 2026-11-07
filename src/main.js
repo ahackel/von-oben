@@ -3,7 +3,7 @@
 import { HEX, tone, mix } from './pixels.js';
 import { text, textWidth } from '../lib/font.js';
 import { makeWorld, update, setWeather, terrain, elevation, hash, isWater, W, H, DEEP, WATER, SAND, GRASS, ROCK, SNOW, PERCH } from './world.js';
-import { makeBird, step, CRUISE, FLY_AT } from './bird.js';
+import { makeBird, step, CRUISE, HIGH, FLY_AT } from './bird.js';
 import { eagle, poseOf, beak } from './eagle.js';
 import { ART, HOUSE_LIGHTS } from './art/island.js';
 
@@ -32,7 +32,7 @@ function sky() {
   return [mix(c0, c1, e), d0 + (d1 - d0) * e];
 }
 globalThis.vonOben = { bird, world, setDay: (d) => (day = d), newDay }; // (to look into, from the console)
-const ZOOM_GROUND = 4, ZOOM_AIR = 1.5, VERSION = 'V11'; // (on the title: is the new code there?)
+const ZOOM_GROUND = 4, ZOOM_AIR = 1.5, VERSION = 'V12'; // (on the title: is the new code there?)
 
 function resize() {
   dpr = window.devicePixelRatio || 1; cw = cv.width = Math.round(innerWidth * dpr); ch = cv.height = Math.round(innerHeight * dpr);
@@ -125,7 +125,8 @@ function frame(now) {
   for (let i = wake.length - 1; i >= 0; i--) if ((wake[i].t += dt) > 2) wake.splice(i, 1);
   for (let i = particles.length - 1; i >= 0; i--) if ((particles[i].t += dt) > 1.2) particles.splice(i, 1);
   const up = bird.state === 'ground' ? 0 : bird.z; // (in its nest: as on the ground)
-  zoom += ((ZOOM_GROUND + (ZOOM_AIR - ZOOM_GROUND) * Math.min(1, up / CRUISE)) - zoom) * Math.min(1, dt * 3);
+  const want = ZOOM_GROUND + (ZOOM_AIR - ZOOM_GROUND) * Math.min(1, up / CRUISE) - Math.max(0, (up - CRUISE) / (HIGH - CRUISE)) * 0.4; // (higher yet: farther out)
+  zoom += (want - zoom) * Math.min(1, dt * 3);
   draw();
 }
 
@@ -138,10 +139,11 @@ function draw() {
   const x0 = camx - cw / 2 / S - 40, x1 = camx + cw / 2 / S + 40, y0 = camy - ch / 2 / S - 20, y1 = camy + ch / 2 / S + 60;
   // the sea: wave crests coming and going (a little arc each), and waves running in to the shore: a line of foam where
   // the water is as shallow as each has got, fading as it reaches the sand; two at a time
-  for (let j = Math.floor(y0 / 14); j < y1 / 14; j++) for (let i = Math.floor(x0 / 14); i < x1 / 14; i++) {
+  const wdx = world.wind.x * t * 0.9, wdy = world.wind.y * t * 0.9; // (the wind: the crests running along with it)
+  for (let j = Math.floor((y0 - wdy) / 14); j < (y1 - wdy) / 14; j++) for (let i = Math.floor((x0 - wdx) / 14); i < (x1 - wdx) / 14; i++) {
     const h = hash(i, j, 3), f = Math.sin(t * 0.9 + h * 40);
     if (f < 0.3) continue;
-    const x = i * 14 + Math.floor(h * 9) + Math.floor(((t * 0.9 + h * 40) % (Math.PI * 2)) * 0.8), y = j * 14 + Math.floor(hash(i, j, 4) * 11);
+    const x = Math.round(i * 14 + h * 9 + wdx) + Math.floor(((t * 0.9 + h * 40) % (Math.PI * 2)) * 0.8), y = Math.round(j * 14 + hash(i, j, 4) * 11 + wdy);
     if (!isWater(world, x, y)) continue;
     ctx.fillStyle = `rgba(178,205,232,${Math.min(1, (f - 0.3) * 2.5)})`;
     ctx.fillRect(x, y, 4, 1); ctx.fillRect(x - 1, y + 1, 1, 1); ctx.fillRect(x + 4, y + 1, 1, 1);
@@ -183,13 +185,23 @@ function draw() {
   if (bird.state !== 'dive' && !(bird.state === 'ground' && bird.z > 0)) {
     const s = 1 - (bird.z / CRUISE) * 0.45; ctx.beginPath(); ctx.ellipse(bird.x + bird.z * 0.3, bird.y + bird.z * 0.15, 6 * s, 2.5 * s, 0, 0, Math.PI * 2); ctx.fill();
   }
-  const drawn = [...seen, { bird: true, y: bird.z >= 20 ? Infinity : bird.y + 0.5 }].sort((a, b) => a.y - b.y);
+  const high = bird.z >= 20, gust = world.weather === 'storm' ? 1.7 : world.weather === 'wind' ? 1 : 0;
+  const drawn = [...seen, ...(high ? [] : [{ bird: true, y: bird.y + 0.5 }])].sort((a, b) => a.y - b.y);
   for (const o of drawn) {
     if (o.bird) { drawBird(); continue; }
     const s = o.art === 'fountain' ? ART[`fountain${Math.floor(t * 6) % 3}`] : ART[o.art];
-    s.draw(ctx, o.x - s.w / 2, o.y - s.h + 1);
+    if (gust && /^(pine|oak|bush)/.test(o.art)) { // (the wind: trees and bushes leaning with it, swaying; the higher, the more)
+      const k = (Math.sign(world.wind.x) * 0.06 + Math.sin(t * 2.6 + o.x * 0.05 + o.y * 0.03) * 0.07) * gust;
+      ctx.save(); ctx.translate(o.x, o.y + 1); ctx.transform(1, 0, -k, 1, 0, 0); s.draw(ctx, -s.w / 2, -s.h); ctx.restore();
+    } else s.draw(ctx, o.x - s.w / 2, o.y - s.h + 1);
     if (o.nest) ART.nest.draw(ctx, o.x - ART.nest.w / 2, o.y - PERCH - ART.nest.h / 2);
   }
+  // clouds: their shadows on the ground (in sunshine), the clouds up at CLOUD; high, the eagle over them, else under
+  const [, darkNow] = sky(), cl = CLOUDS[world.weather];
+  if (cl && (world.weather === 'sun' || world.weather === 'wind')) layered(S, camx, camy, (g) => clouds(g, x0, x1, y0, y1, 0, '#000', null), 0.2 * wfade * (1 - darkNow), 35, 17);
+  const over = Math.min(1, Math.max(0, (bird.z - CLOUD + 10) / 20)), cloudA = (0.25 + 0.67 * over) * wfade;
+  if (high && bird.z > CLOUD) { if (cl) layered(S, camx, camy, (g) => clouds(g, x0, x1, y0, y1, CLOUD, cl[1], cl[2]), cloudA, 0, 0); drawBird(); }
+  else { if (high) drawBird(); if (cl) layered(S, camx, camy, (g) => clouds(g, x0, x1, y0, y1, CLOUD, cl[1], cl[2]), cloudA, 0, 0); }
   for (const p of particles) if (p.type === 'drop') { // (thrown up, falling back)
     const z = p.vz * p.t - 90 * p.t * p.t;
     if (z > 0) { ctx.fillStyle = 'rgba(253,251,246,0.9)'; ctx.fillRect(Math.round(p.x + p.vx * p.t), Math.round(p.y + p.vy * p.t - z), 1, 2); }
@@ -294,6 +306,46 @@ function weather(S) {
       ctx.globalAlpha = 1;
     }
   }
+  // rays of sunlight, slanting down from the top left through the fog (in the sun: faint)
+  const [, dark] = sky(), ray = (wk === 'fog' ? 0.14 : wk === 'sun' ? 0.06 : 0) * f * (1 - dark);
+  if (ray > 0.005) {
+    ctx.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < 5; i++) {
+      const x = cw * (hash(i, 0, 18) * 1.2 - 0.4) + Math.sin(t * 0.15 + i) * cw * 0.04, bw = cw * (0.03 + hash(i, 1, 18) * 0.07), run = ch * 0.7;
+      const g = ctx.createLinearGradient(0, 0, 0, ch); g.addColorStop(0, `rgba(255,236,190,${ray * (0.7 + 0.3 * Math.sin(t * 0.5 + i * 2))})`); g.addColorStop(1, 'rgba(255,236,190,0)');
+      ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x + bw, 0); ctx.lineTo(x + bw * 2 + run, ch); ctx.lineTo(x + run, ch); ctx.closePath(); ctx.fill();
+    }
+    ctx.globalCompositeOperation = 'source-over';
+  }
+}
+
+// the clouds: by the weather how many (of the sky), their color, their underside's
+const CLOUD = 115, CC = 260;
+const CLOUDS = { sun: [0.3, '#fdfbf6', '#d9dcea'], wind: [0.4, '#fdfbf6', '#d9dcea'], rain: [0.7, '#b4b9cc', '#8c91aa'], snow: [0.65, '#dfe2ec', '#b9bdd0'], storm: [0.85, '#7d8099', '#5b5e78'] };
+// each puff of the clouds in view (drifting with the wind, or a breeze), drawn at height h (as seen from above: up the screen)
+function clouds(g, x0, x1, y0, y1, h, col, under) {
+  const t = world.time, cov = CLOUDS[world.weather][0], v = world.wind.x || world.wind.y ? world.wind : { x: 6, y: 2 }, dx = v.x * t * 1.4, dy = v.y * t * 1.4;
+  for (const pass of under ? [under, col] : [col]) {
+    g.fillStyle = pass; const off = pass === under ? 3 : 0;
+    for (let j = Math.floor((y0 + h - dy - 150) / CC); j < (y1 + h - dy + 150) / CC; j++) for (let i = Math.floor((x0 - dx - 150) / CC); i < (x1 - dx + 150) / CC; i++) {
+      if (hash(i, j, 21) > cov) continue;
+      const cx = i * CC + hash(i, j, 22) * CC * 0.6 + dx, cy = j * CC + hash(i, j, 23) * CC * 0.6 + dy - h;
+      for (let k = 0, n = 4 + Math.floor(hash(i, j, 24) * 4); k < n; k++) {
+        g.beginPath(); g.arc(Math.round(cx + (hash(i, j, 30 + k) - 0.5) * 130 + off), Math.round(cy + (hash(i, j, 50 + k) - 0.5) * 50 + off), 20 + hash(i, j, 70 + k) * 26, 0, Math.PI * 2); g.fill();
+      }
+    }
+  }
+}
+// drawn on a layer of the world's pixels (so overlapping puffs make one cloud, and as pixels), laid over at alpha a
+const layer = document.createElement('canvas'), lctx = layer.getContext('2d');
+function layered(S, camx, camy, paint, a, ox, oy) {
+  if (a <= 0.01) return;
+  const lw = Math.ceil(cw / S) + 4, lh = Math.ceil(ch / S) + 4;
+  if (layer.width < lw || layer.height < lh) { layer.width = Math.max(lw, layer.width); layer.height = Math.max(lh, layer.height); }
+  const lx = Math.floor(camx - cw / 2 / S) - 2, ly = Math.floor(camy - ch / 2 / S) - 2;
+  lctx.setTransform(1, 0, 0, 1, 0, 0); lctx.clearRect(0, 0, layer.width, layer.height);
+  lctx.setTransform(1, 0, 0, 1, -lx + ox, -ly + oy); paint(lctx);
+  ctx.globalAlpha = a; ctx.drawImage(layer, lx, ly); ctx.globalAlpha = 1;
 }
 
 function drawBird() {
@@ -371,7 +423,7 @@ function sticksDraw(u) {
     ctx.fillStyle = s.id !== null ? 'rgba(253,251,246,0.75)' : 'rgba(253,251,246,0.45)';
     ctx.beginPath(); ctx.arc(kx, ky, r * 0.38, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
     if (across) continue;
-    const marks = [[FLY_AT + 0.15, 'FLIEGEN'], [0.52, 'RENNEN'], [0.18, 'GEHEN'], [-0.15, 'STOP']], lu = Math.max(2, Math.round(u * 0.7));
+    const marks = [[1.02, 'HOCH'], [FLY_AT + 0.08, 'FLIEGEN'], [0.52, 'RENNEN'], [0.18, 'GEHEN'], [-0.15, 'STOP']], lu = Math.max(2, Math.round(u * 0.7));
     if (bird.state === 'swim' || bird.state === 'dive') marks.push([-0.8, 'TAUCHEN']);
     if (bird.state === 'air') marks.push([-0.8, 'STURZFLUG']);
     for (const [v, label] of marks) text(ctx, label, hx - r * 0.45, hy - v * r - lu * 2.5, 'rgba(253,251,246,0.85)', 'right', lu);
