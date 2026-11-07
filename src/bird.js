@@ -4,7 +4,7 @@
 // on the sea, to dive; flying, to stoop). Let go and it slows, glides down and lands. It hunts stooping: down fast on
 // a mouse, beetle, worm or fish, it has it in its claws; eaten only on land. Rocks (PERCH px up) to land on; one its
 // home, a nest: sitting still in it, it falls asleep and its energy fills up.
-import { W, H, SEA, PERCH, blocked, isWater, perchNear, snatch, take, alive, nearestPrey, FOOD } from './world.js';
+import { W, H, SEA, PERCH, WALL, terrain, blocked, isWater, perchNear, snatch, take, alive, nearestPrey, FOOD } from './world.js';
 
 export const CRUISE = 90, HIGH = 150; // (the height it flies at; up to, the stick right up: over the clouds)
 const NEST = 10, SLEEP_AFTER = 1, REST = 25; // (how near the nest's middle it sits in it; still how long till asleep; energy a second asleep)
@@ -24,7 +24,7 @@ export function step(b, { turn = 0, push = 0 }, dt, w) {
   let cost = 0;
   const perched = b.state === 'ground' && b.z > 0;
   if (perched) b.perch ??= perchNear(w, b.x, b.y, NEST * 2);
-  const inNest = perched && b.perch?.nest && Math.hypot(b.x - b.perch.x, b.y - b.perch.y) < NEST;
+  const inNest = perched && b.perch?.nest && b.nestOk !== false && Math.hypot(b.x - b.perch.x, b.y - b.perch.y) < NEST;
   if (b.state === 'ground' || b.state === 'swim') {
     const swim = b.state === 'swim'; b.wet = swim ? (b.wet || 0) + dt : 0; // (just down in the sea from a stoop: not diving yet)
     const t = off ? TAKEOFF + 4 : Math.min(paced(push), swim ? SWIM : RUN);
@@ -33,8 +33,9 @@ export function step(b, { turn = 0, push = 0 }, dt, w) {
     else if (swim && push < -0.5 && b.wet > 0.5) { b.state = 'dive'; b.dive = DIVE; b.v *= 0.3; b.events.push({ type: 'splash', x: b.x, y: b.y }); }
     cost = swim ? 0.4 : b.v > WALK + 2 ? 0.6 : b.v > 1 ? 0.2 : 0;
     if (!swim && !b.z && !b.prey) { const kind = snatch(w, b.x, b.y, PECK); if (kind) { b.prey = kind; b.events.push({ type: 'catch', kind, x: b.x, y: b.y }); } } // (on foot: grabbed)
-    if (!swim && b.prey && b.v < 3) { // (on land, with its prey: eating it)
-      if ((b.eating += dt) > EAT) { b.energy += FOOD[b.prey]; b.events.push({ type: 'eat', x: b.x, y: b.y - b.z, value: FOOD[b.prey] }); b.prey = null; b.caught++; b.eating = 0; }
+    if (!swim && b.prey && b.v < 3) { // (on land, with its prey: eating it; in the nest, a chick hungry: feeding it)
+      if (inNest && b.feeds && (b.eating += dt) > EAT) { b.events.push({ type: 'feed', kind: b.prey, x: b.x, y: b.y - b.z }); b.prey = null; b.eating = 0; }
+      else if (!(inNest && b.feeds) && (b.eating += dt) > EAT) { b.energy += FOOD[b.prey]; b.events.push({ type: 'eat', x: b.x, y: b.y - b.z, value: FOOD[b.prey] }); b.prey = null; b.caught++; b.eating = 0; }
     } else b.eating = 0;
     b.still = inNest && b.v < 1 && push <= 0.02 ? b.still + dt : 0;
     b.asleep = b.still > SLEEP_AFTER;
@@ -54,11 +55,11 @@ export function step(b, { turn = 0, push = 0 }, dt, w) {
     const nest = (t) => t?.nest === true, nestAt = w.objects.find(nest);
     if (b.target && ((!nest(b.target) && (!alive(b.target) || b.prey)) || Math.hypot(b.target.x - b.x, b.target.y - b.y) > LOSE)) b.target = null;
     if (!b.target) {
-      const dn = Math.hypot(nestAt.x - b.x, nestAt.y - b.y), q = !b.prey && nearestPrey(w, b.x, b.y, Math.min(SPOT, dn)), p = q || (dn < SPOT ? nestAt : null); // (whichever is nearer)
+      const dn = nestAt ? Math.hypot(nestAt.x - b.x, nestAt.y - b.y) : Infinity, q = !b.prey && nearestPrey(w, b.x, b.y, Math.min(SPOT, dn)), p = q || (dn < SPOT ? nestAt : null); // (whichever is nearer)
       b.focus = p ? b.focus + dt : 0; if (b.focus > FOCUS) { b.target = p; b.focus = 0; }
     }
     b.stooping = stoop;
-    if (fly) { const top = CRUISE + Math.max(0, (push - 0.85) / 0.15) * (HIGH - CRUISE); b.z = toward(b.z, top, 40 * dt); b.v = toward(b.v, TAKEOFF + (FAST - TAKEOFF) * Math.min(1, (push - FLY_AT) / (1 - FLY_AT)), 30 * dt); cost = b.z < top - 1 ? 4 : 2.5; b.climbing = b.z < top - 1; }
+    if (fly) { const top = Math.min(w.roof ?? HIGH, CRUISE + Math.max(0, (push - 0.85) / 0.15) * (HIGH - CRUISE)); /* (inside: no higher than the roof) */ b.z = toward(b.z, top, 40 * dt); b.v = toward(b.v, TAKEOFF + (FAST - TAKEOFF) * Math.min(1, (push - FLY_AT) / (1 - FLY_AT)), 30 * dt); cost = b.z < top - 1 ? 4 : 2.5; b.climbing = b.z < top - 1; }
     else { b.z -= (stoop ? STOOP : 28) * dt; b.v = toward(b.v, GLIDE, 20 * dt); cost = 0.5; }
     b.x += w.wind.x * dt * Math.min(1, b.z / 30); b.y += w.wind.y * dt * Math.min(1, b.z / 30); // (the wind carrying it, up high)
     b.flap += dt; b.flapping = fly; if (!fly) b.climbing = false;
@@ -86,9 +87,10 @@ export function step(b, { turn = 0, push = 0 }, dt, w) {
   if (b.state !== 'ground') { b.asleep = false; b.still = 0; }
   if (b.state !== 'air') { b.target = null; b.focus = 0; b.stooping = false; }
   const dx = Math.cos(b.a) * b.v * dt, dy = Math.sin(b.a) * b.v * dt, grounded = b.state === 'ground' && !b.z;
-  if (!grounded || !blocked(w, b.x + dx, b.y)) b.x += dx;
-  if (!grounded || !blocked(w, b.x, b.y + dy)) b.y += dy;
-  b.x = Math.max(-SEA, Math.min(W + SEA, b.x)); b.y = Math.max(-SEA, Math.min(H + SEA, b.y));
+  const stop = (x, y) => (grounded ? blocked(w, x, y) : terrain(w, x, y) === WALL); // (inside, even flying: the walls)
+  if (!stop(b.x + dx, b.y)) b.x += dx;
+  if (!stop(b.x, b.y + dy)) b.y += dy;
+  if (!w.room) { b.x = Math.max(-SEA - 40, Math.min(W + SEA + 40, b.x)); b.y = Math.max(-SEA - 40, Math.min(H + SEA + 40, b.y)); } // (beyond the sea's edge: the next island, see main)
   b.stride += b.v * dt;
   if (b.state === 'ground' && b.z > 0 && Math.hypot(b.x - b.perch.x, b.y - b.perch.y) > NEST) b.state = 'air'; // (off the rock's edge: gliding)
   else if (b.state === 'ground' && !b.z && isWater(w, b.x, b.y)) { b.state = 'swim'; b.v = Math.min(b.v, SWIM); b.events.push({ type: 'splash', x: b.x, y: b.y }); }

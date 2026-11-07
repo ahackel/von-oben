@@ -141,5 +141,28 @@ const SMALL = {
   worm: { keys: { P: 'lightPink', p: 'pink', r: 'rose' }, rows: ['.PP..', 'p..pp', '.....'] },
   fish: { keys: { S: 'blueGrey.light', s: 'blueGrey', d: 'blueGrey.shade' }, rows: ['.SSS..S', 'SeSssSs', '.ddd..d'] },
 };
+// a barn: a red gable seen from the front, its planks, a big door open (dark inside); 66 wide, its footprint 64 by 26
+function barnRows() {
+  const w = 66, roof = 20, wall = 26, rows = [];
+  for (let y = 0; y < roof; y++) { let r = ''; for (let x = 0; x < w; x++) { const half = 6 + (y / roof) * (w / 2 - 6); r += Math.abs(x - (w - 1) / 2) > half ? '.' : Math.abs(Math.abs(x - (w - 1) / 2) - half) < 1.5 ? 'T' : y % 4 === 3 ? 'r' : x < w / 2 ? 'L' : 'R'; } rows.push(r); }
+  for (let y = 0; y < wall; y++) { let r = ''; for (let x = 0; x < w; x++) { const dx = Math.abs(x - (w - 1) / 2); r += x === 0 || x === w - 1 || y === 0 ? 'T' : dx < 8 && y > 5 ? (dx > 6.5 || y === 6 ? 'T' : 'D') : x % 5 === 0 ? 'w' : 'W'; } rows.push(r); }
+  return rows;
+}
+// a cave's mouth: an arch of dark in the rock
+function caveRows() {
+  const w = 24, h = 18, rows = [];
+  for (let y = 0; y < h; y++) { let r = ''; for (let x = 0; x < w; x++) { const dx = (x - (w - 1) / 2) / (w / 2), dy = (y - h) / h, d = Math.hypot(dx, dy); r += d > 1 ? '.' : d > 0.78 ? (dy < -0.6 ? 'N' : 'g') : d > 0.6 ? 'E' : 'b'; } rows.push(r); }
+  return rows;
+}
+const ROOMS = {
+  barn: { keys: { L: 'red.light', R: 'red', r: 'red.shade', W: 'red', w: 'red.shade', T: 'white', D: 'deepBrown.dark' }, rows: barnRows() },
+  cave: { keys: { ...STONE, b: 'black' }, rows: caveRows() },
+  hay: { keys: { Y: 'yellow.light', y: 'ochre', o: 'ochre.shade' }, rows: ['.YYYYYYYYYYYYYYYYYYYYYYYYYY.', ...Array.from({ length: 11 }, (_, j) => [...'yYYYYYYYYYYYYYYYYYYYYYYYYYYy'].map((c, i) => (i % 9 === 4 || j === 10 ? 'o' : j < 3 ? 'Y' : (i * 7 + j * 3) % 11 === 0 ? 'y' : c === 'Y' ? (j > 7 ? 'y' : 'Y') : c)).join(''))] },
+  beam: { keys: { B: 'brown.light', b: 'brown', d: 'brown.shade' }, rows: [...['BBBBBBBBBBBBBBBBBBBBBBBBBBBBBB', 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', 'dddddddddddddddddddddddddddddd'], ...Array.from({ length: PERCH }, () => '.............bbd..............')] },
+  gem: { keys: { W: 'white', B: 'blue.light', b: 'blue', p: 'purple' }, rows: ['..W..', '.WBb.', 'WBbbp', '.bbp.', '..p..'] },
+  bat: { keys: { M: 'mauve.shade', m: 'mauve.dark' }, rows: ['m.......m', 'mM.M.M.Mm', '.MMMeMMM.', '....M....'] }, // (wings up)
+  bat1: { keys: { M: 'mauve.shade', m: 'mauve.dark' }, rows: ['...M.M...', '.MMMeMMM.', 'mM..M..Mm', 'm.......m'] }, // (down)
+  egg: { keys: { C: 'cream.light', c: 'cream', s: 'beige.shade' }, rows: ['.CC.', 'CCCc', 'CsCc', 'cccs', '.ss.'] },
+};
 const make = (defs) => Object.fromEntries(Object.entries(defs).map(([k, d]) => [k, sprite({ name: k, ...d })]));
-export const ART = { ...GARDEN, ...make(HOUSES), ...make(TREES), ...make(NEST), ...make(ROCKS), ...make(SMALL) };
+export const ART = { ...GARDEN, ...make(HOUSES), ...make(TREES), ...make(NEST), ...make(ROCKS), ...make(SMALL), ...make(ROOMS) };

@@ -14,10 +14,24 @@
   html, body { margin: 0; height: 100%; overflow: hidden; overscroll-behavior: none; background: #000; }
   canvas { display: block; position: fixed; inset: 0; width: 100vw; height: 100vh; height: 100dvh; image-rendering: pixelated; touch-action: none;
     -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; }
+  #ui { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(43,37,65,.55); z-index: 5; }
+  #ui, #menuBtn { font: bold 16px/1.35 ui-monospace, Menlo, monospace; color: #fdfbf6; text-transform: uppercase; }
+  .panel { background: #2b2541; border: 4px solid #fdfbf6; box-shadow: 6px 6px 0 #000; padding: 18px; max-width: min(560px, 92vw); max-height: 86vh; overflow: auto; text-align: center; }
+  .panel h1 { font-size: 24px; margin: 0 0 12px; color: #ffe25a; }
+  .panel canvas { position: static; width: auto; height: auto; display: inline-block; }
+  .panel input { font: inherit; font-size: 22px; text-align: center; width: 70%; margin: 10px 0; padding: 8px; background: #fdfbf6; color: #2b2541; border: 3px solid #000; text-transform: uppercase; }
+  .panel button, #menuBtn { font: inherit; background: #ffe25a; color: #2b2541; border: 3px solid #000; box-shadow: 3px 3px 0 #000; padding: 8px 14px; margin: 6px; }
+  .list { text-align: left; }
+  .row { display: flex; align-items: center; gap: 12px; padding: 8px; border-bottom: 2px solid #4b4570; }
+  .row.now { background: #3d3560; } .row.sub { padding-left: 40px; }
+  .row .txt { flex: 1; display: flex; flex-direction: column; } .row .txt span { font-size: 13px; color: #c8c4dc; }
+  #menuBtn { position: fixed; right: max(8px, env(safe-area-inset-right)); top: 100px; z-index: 4; display: none; }
 </style>
 </head>
 <body>
 <canvas id="game"></canvas>
+<button id="menuBtn">ADLER</button>
+<div id="ui"></div>
 <pre id="errors" style="position:fixed;left:8px;right:8px;bottom:8px;margin:0;color:#fff;background:rgba(160,20,40,.85);font:13px/1.3 monospace;white-space:pre-wrap;display:none;z-index:9"></pre>
 <script>
   // errors on the screen (there is no console on an iPad): from loading the game too

@@ -1,7 +1,8 @@
 // npm test: the island and the eagle without a screen: there is land and sea, a village; the eagle takes off, flies,
 // gets tired, glides down and lands when let go; it can't walk through a house; it eats; it swims, dives and (with luck) catches a fish.
 import assert from 'node:assert/strict';
-import { makeWorld, update, setWeather, terrain, isWater, blocked, W, H, GRASS, ROCK, DEEP, PERCH } from '../src/world.js';
+import { makeWorld, makeRoom, update, setWeather, terrain, isWater, blocked, doorAt, islandSeed, W, H, GRASS, ROCK, DEEP, WALL, PERCH } from '../src/world.js';
+import * as fam from '../src/family.js';
 import { makeBird, step, CRUISE } from '../src/bird.js';
 
 const w = makeWorld();
@@ -107,4 +108,41 @@ assert.ok(hb.state === 'ground' && hb.z === PERCH && hb.perch?.nest, 'stooped in
 // out to sea, beyond the island's map
 const o = makeBird(W - 20, H / 2, CRUISE); o.state = 'air'; o.v = 90; o.a = 0; run(o, { push: 1 }, 10);
 assert.ok(o.x > W + 300 && o.state === 'air', 'far out over the sea');
+// other islands: each its own, the same each time
+{
+  const a = makeWorld(islandSeed(1, 0)), b = makeWorld(islandSeed(1, 0));
+  assert.notDeepEqual(a.ground.slice(0, 5000).join() + a.nest.x, w.ground.slice(0, 5000).join() + w.nest.x, 'another island');
+  assert.deepEqual([a.nest, a.objects.length], [b.nest, b.objects.length], 'the same for everyone');
+}
+// barns and caves: in through the door, the mouth
+const barn = w.objects.find((o) => o.door), cave = w.objects.find((o) => o.cave);
+assert.ok(barn && cave, 'a barn, a cave');
+const wb = makeBird(barn.x, barn.y + 6); wb.a = -Math.PI / 2;
+let inside = null; for (let n = 0; n < 120 && !inside; n++) { step(wb, { push: 0.3 }, 1 / 60, w); inside = doorAt(w, wb.x, wb.y, wb.z); }
+assert.equal(inside, barn, 'walked in at the barn door');
+assert.ok(blocked(w, barn.x - 20, barn.y - 10) && !blocked(w, barn.x, barn.y - 10), 'its walls, its door');
+for (const kind of ['barn', 'cave']) {
+  const r = makeRoom(kind, 3), rb = makeBird(r.exit.x, r.exit.y - 30, 0); rb.state = 'ground'; rb.a = -Math.PI / 2;
+  for (let t = 0; t < 6; t += 1 / 60) step(rb, { push: 1, turn: 0.2 }, 1 / 60, r);
+  assert.ok(rb.z <= r.roof + 0.01 && terrain(r, rb.x, rb.y) !== WALL, `${kind}: under its roof, inside its walls`);
+  assert.ok(r.food.length > 10 && (kind === 'barn' || r.gems.length > 3), `${kind}: prey${kind === 'cave' ? ', treasure' : ''}`);
+}
+// the family: five days at home, an egg; a chick; fed, grown in three days; flown off, an eagle of its own
+{
+  const save = fam.newGame('ADA', w.nest), e = fam.current(save);
+  for (let d = 0; d < 4; d++) assert.equal(fam.nextDay(e), null);
+  assert.equal(fam.nextDay(e), 'egg'); assert.equal(fam.nextDay(e), 'hatch');
+  assert.ok(fam.hungry(e)); fam.feed(e); fam.nextDay(e); assert.equal(e.brood.chick.grown, 0, 'fed too little: not grown');
+  let ev = null; for (let d = 0; d < 3; d++) { fam.feed(e); fam.feed(e); assert.ok(!fam.hungry(e)); ev = fam.nextDay(e); }
+  assert.equal(ev, 'grown');
+  e.brood.chick.name = 'BEN';
+  const k = fam.fledge(save, e);
+  assert.ok(k.name === 'BEN' && !k.home && e.brood.stage === 'none' && save.eagles.length === 2, 'flown off');
+  assert.ok(!fam.claim(save, k, w.nest), 'its parent\'s nest is taken');
+  k.gx = 1; assert.ok(fam.claim(save, k, { x: 5, y: 5 }) && fam.residentOf(save, 1, 0) === k, 'a free nest: its home');
+  // in the nest with prey, the chick hungry: fed to it, not eaten
+  const fb = makeBird(w.nest.x, w.nest.y, PERCH); fb.prey = 'mouse'; fb.feeds = true; fb.energy = 50;
+  run(fb, { push: 0 }, 1);
+  assert.ok(!fb.prey && fb.energy >= 50 && fb.events.some((v) => v.type === 'feed'), 'fed to the chick');
+}
 console.log('ok');

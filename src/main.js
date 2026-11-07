@@ -2,14 +2,18 @@
 // to it on the ground, farther away the higher it flies. Two sticks: the left turns it, the right sets its pace.
 import { HEX, tone, mix } from './pixels.js';
 import { text, textWidth } from '../lib/font.js';
-import { makeWorld, update, setWeather, terrain, elevation, hash, isWater, W, H, DEEP, WATER, SAND, GRASS, ROCK, SNOW, PERCH } from './world.js';
+import { makeWorld, makeRoom, update, setWeather, terrain, elevation, hash, isWater, doorAt, islandSeed, islandName, W, H, SEA, DEEP, WATER, SAND, GRASS, ROCK, SNOW, FLOOR, WALL, CAVE, PERCH } from './world.js';
 import { makeBird, step, CRUISE, HIGH, FLY_AT } from './bird.js';
-import { eagle, poseOf, beak } from './eagle.js';
+import { eagle, poseOf, beak, lookOf } from './eagle.js';
 import { ART, HOUSE_LIGHTS } from './art/island.js';
+import * as fam from './family.js';
+import * as ui from './menu.js';
 
 const cv = document.getElementById('game'), ctx = cv.getContext('2d');
-const world = makeWorld(), bird = makeBird(world.nest.x, world.nest.y, PERCH); // (it starts at home, in its nest)
-let cw = 0, ch = 0, dpr = 1, zoom = 4, started = false, last = performance.now(), keyPush = 0;
+// the game: all the eagles (kept), the one played (me), its island, where it is (the island, or a cave or barn on it)
+let save = fam.load(), fresh = !save, me = null, island = null, world = null, ground = null, bird = null, look = null;
+if (!save) save = fam.newGame('', (island = makeWorld(islandSeed(0, 0))).nest);
+let cw = 0, ch = 0, dpr = 1, zoom = 4, started = false, last = performance.now(), keyPush = 0, notice = null;
 const particles = [], wake = [], keys = new Set(); // (wake: where it swam, the water's V spreading behind it)
 // a day: DAY seconds (asleep: 12 times as fast). Through it, what the world is tinted with (multiplied: as Lop Hop's
 // sunset and morning tint its palette) and how dark it is: day, a sunset, a purple dusk, the night, a pink morning
@@ -20,29 +24,36 @@ let day = 0.08;
 const WEATHERS = ['sun', 'rain', 'fog', 'wind', 'snow', 'storm'], SAY = { sun: ['SONNE', 'EIDECHSEN SONNEN SICH'], rain: ['REGEN', 'WÜRMER UND FRÖSCHE KOMMEN RAUS'],
   fog: ['NEBEL', 'DIE MÄUSE WAGEN SICH RAUS'], wind: ['WIND', 'KÄFER KRABBELN, DER WIND TREIBT DICH AB'],
   snow: ['SCHNEE', 'MÄUSE IM SCHNEE SIEHT MAN GUT'], storm: ['GEWITTER', 'FRÖSCHE UND WÜRMER, ABER STURM!'] };
-let dayN = 1, wfade = 1, banner = 0;
+let wfade = 1, banner = 0;
+// a day's weather on an island (the first day: sun; never the same two days running)
+const pick = (n, seed) => WEATHERS[Math.floor(hash(n, seed % 100000, 9) * WEATHERS.length)];
+const weatherOf = (n, seed) => { if (n <= 1) return 'sun'; const k = pick(n, seed), was = n === 2 ? 'sun' : pick(n - 1, seed); return k === was ? WEATHERS[(WEATHERS.indexOf(k) + 1) % WEATHERS.length] : k; };
 function newDay() {
-  dayN++;
-  let k = WEATHERS[Math.floor(hash(dayN, 7, 9) * WEATHERS.length)];
-  if (k === world.weather) k = WEATHERS[(WEATHERS.indexOf(k) + 1) % WEATHERS.length];
-  setWeather(world, k); wfade = 0; banner = 6;
+  const ev = fam.nextDay(me);
+  setWeather(island, weatherOf(me.dayN, island.seed)); wfade = 0; banner = 6;
+  if (ev === 'egg') say('EIN EI IM NEST!');
+  if (ev === 'grown') say(`${me.brood.chick.name} IST GROSS! UNTER "ADLER": AUSFLIEGEN`);
+  if (ev === 'hatch') ui.ask('EIN KÜKEN IST GESCHLÜPFT!', picture((g) => drawChick(g, 0, 0, 0, 'stand'), 40, 30, 4), 'WIE SOLL ES HEISSEN?').then((n) => { me.brood.chick.name = n; fam.store(save); });
+  fam.store(save);
 }
+const say = (text) => { notice = { text, t: 7 }; };
 function sky() {
   const i = SKY.findIndex(([at]) => at > day), [a0, c0, d0] = SKY[i - 1], [a1, c1, d1] = SKY[i], f = (day - a0) / (a1 - a0), e = f * f * (3 - 2 * f);
   return [mix(c0, c1, e), d0 + (d1 - d0) * e];
 }
-globalThis.vonOben = { bird, world, setDay: (d) => (day = d), newDay }; // (to look into, from the console)
-const ZOOM_GROUND = 4, ZOOM_AIR = 1.5, VERSION = 'V12'; // (on the title: is the new code there?)
+globalThis.vonOben = { get bird() { return bird; }, get world() { return world; }, get me() { return me; }, save, setDay: (d) => (day = d), newDay, play }; // (to look into, from the console)
+const ZOOM_GROUND = 4, ZOOM_AIR = 1.5, VERSION = 'V13'; // (on the title: is the new code there?)
 
 function resize() {
   dpr = window.devicePixelRatio || 1; cw = cv.width = Math.round(innerWidth * dpr); ch = cv.height = Math.round(innerHeight * dpr);
 }
 addEventListener('resize', resize); resize();
 
-const shallows = new Map(); // (64 px squares of the sea → the shallow spots in them: x, y, how deep)
 // the ground, drawn once, a pixel each: the sea darker the deeper, foam at the shore, sand, grass and paths speckled;
-// the land lit by how it slopes (the light from the top left), the mountains most: bare rock, snow on the peaks
-const groundCanvas = (() => {
+// the land lit by how it slopes (the light from the top left), the mountains most: bare rock, snow on the peaks.
+// Inside: a cave's floor of dark stone, its walls black, lit at their foot; a barn's straw, its plank walls
+function paintGround(world) {
+  const W = world.W, H = world.H, shallows = new Map(); // (64 px squares of the sea → the shallow spots in them: x, y, how deep)
   const c = document.createElement('canvas'); c.width = W; c.height = H;
   const g = c.getContext('2d'), img = g.createImageData(W, H), px = new Uint32Array(img.data.buffer);
   const int = (h) => 0xff000000 | (parseInt(h.slice(5, 7), 16) << 16) | (parseInt(h.slice(3, 5), 16) << 8) | parseInt(h.slice(1, 3), 16);
@@ -57,10 +68,16 @@ const groundCanvas = (() => {
   const grass = [int(tone(HEX.green, 'shade')), int(HEX.green), int(mix(HEX.green, HEX.lightGreen, 0.45))];
   const rock = [int(tone(HEX.slate, 'shade')), int(HEX.slate), int(HEX.blueGrey), int(HEX.charcoal), int(HEX.lightGrey)];
   const snow = [int(mix(HEX.lightGrey, HEX.blueGrey, 0.3)), int(mix(HEX.white, HEX.lightGrey, 0.45)), int(HEX.white)];
+  const cave = [int(tone(HEX.charcoal, 'shade')), int(HEX.charcoal), int(HEX.darkGrey), int(tone(HEX.slate, 'shade')), int(tone(HEX.black, 'line'))];
+  const straw = [int(HEX.ochre), int(HEX.camel), int(tone(HEX.ochre, 'shade')), int(HEX.brown), int(tone(HEX.brown, 'shade')), int(tone(HEX.deepBrown, 'dark'))];
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
     const t = terrain(world, x, y), e = elevation(world, x, y), h = hash(x, y, 1);
     let col;
-    if (t === DEEP) col = deep[Math.min(4, Math.floor(((-e - 0.07) / 0.2) * 5))];
+    if (world.room) { // (a wall's face: just above the floor, 8 px of it; above that the dark)
+      const face = t === WALL && terrain(world, x, y + 8) !== WALL;
+      if (world.room === 'cave') col = t === CAVE ? cave[h < 0.08 ? 2 : h > 0.93 ? 0 : 1] : face ? cave[3] : cave[4];
+      else col = t === FLOOR ? straw[h < 0.1 ? 1 : h > 0.9 ? 2 : 0] : face ? (x % 9 === 0 ? straw[4] : straw[3]) : straw[5];
+    } else if (t === DEEP) col = deep[Math.min(4, Math.floor(((-e - 0.07) / 0.2) * 5))];
     else if (t === WATER) col = e > -0.006 ? foam : shallow[Math.min(4, Math.floor((-e / 0.07) * 5))];
     else {
       const lit = (elevation(world, x + 3, y + 3) - elevation(world, x - 3, y - 3)) * 70, l = lit > 0.35 ? 2 : lit < -0.35 ? 0 : 1;
@@ -77,8 +94,83 @@ const groundCanvas = (() => {
     }
   }
   g.putImageData(img, 0, 0);
-  return c;
-})();
+  return { canvas: c, shallows };
+}
+// a picture (for the menu): drawn by f at scale k, w by h pixels
+function picture(f, w, h, k) {
+  const c = document.createElement('canvas'); c.width = w * k; c.height = h * k;
+  const g = c.getContext('2d'); g.imageSmoothingEnabled = false; g.scale(k, k); f(g); return c;
+}
+const portrait = (lk, k = 3) => picture((g) => { const p = eagle('stand', Math.PI * 0.35, lk); g.drawImage(p.canvas, 15 - p.ox, 26 - p.oy); }, 30, 30, k);
+// a chick (by how grown) or what grew of it, in the nest at (x, y)
+function drawChick(g, x, y, grown, pose, lk = lookOf(0, grown)) { const p = eagle(pose, Math.PI / 2 + Math.sin(world.time * 1.3) * 0.4, lk); g.drawImage(p.canvas, Math.round(x + 20 - p.ox), Math.round(y + 24 - p.oy)); }
+
+// changing eagle, island, going in and out: the world it is in, its ground drawn (kept: in and out again quickly)
+const grounds = new Map();
+function groundOf(w, key) {
+  if (!grounds.has(key)) { if (grounds.size > 2) grounds.delete([...grounds.keys()].find((k) => k !== 'island')); grounds.set(key, paintGround(w)); }
+  return grounds.get(key);
+}
+function toIsland(gx, gy) {
+  const seed = islandSeed(gx, gy);
+  if (island?.seed !== seed) { island = makeWorld(seed); grounds.clear(); }
+  setWeather(island, weatherOf(me.dayN, seed)); wfade = 1;
+  world = island; ground = groundOf(island, 'island');
+}
+const stash = () => { me.bird = { x: bird.x, y: bird.y, z: bird.z, a: bird.a, state: bird.state === 'dive' ? 'swim' : bird.state, energy: bird.energy, caught: bird.caught, prey: bird.prey }; me.day = day; };
+function play(e) {
+  if (me && bird) stash();
+  me = e; save.current = e.id; look = lookOf(e.look);
+  toIsland(e.gx, e.gy);
+  bird = Object.assign(makeBird(0, 0), e.bird, { events: [] }); day = e.day;
+  if (e.room) goIn(e.room, true);
+  particles.length = 0; wake.length = 0;
+  say(`${e.name}: INSEL ${islandName(e.gx, e.gy)}`);
+  fam.store(save);
+}
+// a barn's door, a cave's mouth (r: which, and where on the island): in; out, at its way out, before the door
+function goIn(r, resume) {
+  world = makeRoom(r.kind, r.seed); ground = groundOf(world, r.key); me.room = r;
+  if (!resume) Object.assign(bird, { x: world.exit.x, y: world.exit.y - 30, a: -Math.PI / 2, z: Math.min(bird.z, world.roof - 4), perch: null, target: null });
+  say(r.kind === 'cave' ? 'EINE HÖHLE! IRGENDWO GLITZERT ES...' : 'EINE SCHEUNE VOLLER MÄUSE');
+}
+function goOut() {
+  const r = me.room; me.room = null; world = island; ground = groundOf(island, 'island');
+  Object.assign(bird, { x: r.x, y: r.y + (r.kind === 'cave' ? 22 : 12), a: Math.PI / 2, perch: null, target: null });
+  if (bird.state === 'ground') bird.z = 0;
+}
+// out beyond the sea's edge: the next island that way
+function travel() {
+  const ex = bird.x > W + SEA ? 1 : bird.x < -SEA ? -1 : 0, ey = bird.y > H + SEA ? 1 : bird.y < -SEA ? -1 : 0;
+  if (!ex && !ey) return;
+  me.gx += ex; me.gy += ey;
+  if (ex) bird.x = ex > 0 ? -SEA + 30 : W + SEA - 30;
+  if (ey) bird.y = ey > 0 ? -SEA + 30 : H + SEA - 30;
+  bird.perch = null; bird.target = null; wake.length = 0;
+  toIsland(me.gx, me.gy);
+  const r = fam.residentOf(save, me.gx, me.gy);
+  say(`INSEL ${islandName(me.gx, me.gy)}${r && r !== me ? `: HIER WOHNT ${r.name}` : !me.home ? ': DAS NEST IST FREI!' : ''}`);
+  stash(); fam.store(save);
+}
+// the menu: every eagle, its egg or chick; to change to one (a grown chick: flying off)
+function openMenu() {
+  stash();
+  const rows = [];
+  for (const e of save.eagles) {
+    rows.push({ picture: portrait(lookOf(e.look)), name: e.name || '?', now: e === me, action: e === me ? null : ['SPIELEN', () => play(e)],
+      lines: [`INSEL ${islandName(e.gx, e.gy)}, TAG ${e.dayN}`, fam.broodSay(e), `${e.bird.caught} BEUTE${e.gems ? `, ${e.gems} SCHÄTZE` : ''}`] });
+    const c = e.brood.chick;
+    if (e.brood.stage === 'egg') rows.push({ sub: true, picture: picture((g) => ART.egg.draw(g, 3, 2), 10, 9, 6), name: 'EIN EI', lines: ['SCHLÜPFT MORGEN'] });
+    if (c) rows.push({ sub: true, picture: portrait(c.ready ? lookOf(c.look) : lookOf(0, c.grown)), name: c.name || 'KÜKEN', lines: [c.ready ? 'IST GROSS UND KANN AUSFLIEGEN' : `WÄCHST: TAG ${c.grown + 1} VON ${fam.GROW_DAYS}`],
+      action: c.ready ? ['AUSFLIEGEN', () => play(fam.fledge(save, e))] : null });
+  }
+  ui.menu(rows);
+}
+const menuBtn = document.getElementById('menuBtn');
+menuBtn.onclick = () => { if (started && !ui.open()) openMenu(); };
+let saveAt = 5;
+addEventListener('pagehide', () => { if (bird) { stash(); fam.store(save); } });
+document.addEventListener('visibilitychange', () => { if (document.hidden && bird) { stash(); fam.store(save); } });
 
 // the sticks: where a finger went down is the stick's middle (near its place: that place)
 const sticks = { turn: { id: null, ox: 0, oy: 0, v: 0 }, push: { id: null, ox: 0, oy: 0, v: 0 } };
@@ -86,7 +178,7 @@ const R = () => Math.min(cw, ch) * 0.14;
 const home = (s) => (s === sticks.turn ? [cw * 0.14, ch * 0.8] : [cw * 0.86, ch * 0.72]);
 cv.addEventListener('pointerdown', (e) => {
   e.preventDefault();
-  if (!started) { started = true; return; }
+  if (!started) { started = true; menuBtn.style.display = 'block'; return; }
   const x = e.clientX * dpr, y = e.clientY * dpr, s = x < cw / 2 ? sticks.turn : sticks.push;
   if (s.id !== null) return;
   const [hx, hy] = home(s), close = Math.hypot(x - hx, y - hy) < R() * 1.6;
@@ -98,7 +190,7 @@ cv.addEventListener('pointermove', (e) => { for (const s of Object.values(sticks
 const up = (e) => { for (const s of Object.values(sticks)) if (s.id === e.pointerId) { s.id = null; s.v = 0; } };
 cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
 document.addEventListener('gesturestart', (e) => e.preventDefault());
-addEventListener('keydown', (e) => { keys.add(e.key); started = true; });
+addEventListener('keydown', (e) => { if (ui.open()) return; keys.add(e.key); if (!started) { started = true; menuBtn.style.display = 'block'; } });
 addEventListener('keyup', (e) => keys.delete(e.key));
 const held = (...k) => k.some((x) => keys.has(x));
 
@@ -111,13 +203,28 @@ function input(dt) { // (keys too: ←→ turn; ↑ held climbs the pace, slowly
 function frame(now) {
   requestAnimationFrame(frame); // (first: an error in one frame doesn't stop the game)
   const dt = Math.max(0, Math.min(0.05, (now - last) / 1000)); last = now; // (the first frame's time can be before the script ran)
+  if (ui.open()) { draw(); return; } // (asking, the menu: it all waits)
   update(world, dt, started ? bird : null);
-  if (started) step(bird, input(dt), dt, world);
-  const was = day;
-  day = (day + (dt * (bird.asleep ? 12 : 1)) / DAY) % 1;
-  if (was < 0.95 && day >= 0.95) newDay();
-  wfade = Math.min(1, wfade + dt / 6); banner = Math.max(0, banner - dt);
+  if (started) {
+    const home = !me.room && fam.residentOf(save, me.gx, me.gy) === me;
+    bird.nestOk = home; bird.feeds = home && fam.hungry(me); // (only its own nest to sleep in; a hungry chick there: fed)
+    step(bird, input(dt), dt, world);
+    if (!me.room) travel();
+    if (!me.room && !me.home && bird.state === 'ground' && bird.perch?.nest && fam.claim(save, me, island.nest)) { say('DAS IST JETZT DEIN NEST!'); fam.store(save); }
+    if (!me.room) { const d = doorAt(world, bird.x, bird.y, bird.z); if (d) goIn({ kind: d.door ? 'barn' : 'cave', key: `${island.seed}:${d.room}`, seed: (island.seed % 100000) * 10 + Number(d.room.slice(-1)) + (d.door ? 0 : 5), x: d.x, y: d.y }); }
+    else if (bird.y > world.exit.y - 12 && Math.abs(bird.x - world.exit.x) < 22) goOut();
+    if (me.room) for (const g of world.gems) { // (treasure: picked up, low, kept found)
+      const k = `${world.seed}:${g.id}`;
+      if (!save.gems[k] && bird.z < 12 && Math.hypot(g.x - bird.x, g.y - bird.y) < 10) { save.gems[k] = 1; me.gems++; particles.push({ type: 'gem', x: g.x, y: g.y, t: 0 }); fam.store(save); }
+    }
+    if ((saveAt -= dt) < 0) { saveAt = 5; stash(); fam.store(save); }
+    const was = day;
+    day = (day + (dt * (bird.asleep ? 12 : 1)) / DAY) % 1;
+    if (was < 0.95 && day >= 0.95) newDay();
+  }
+  wfade = Math.min(1, wfade + dt / 6); banner = Math.max(0, banner - dt); if (notice) notice.t -= dt;
   for (const e of bird.events.splice(0)) {
+    if (e.type === 'feed') fam.feed(me);
     particles.push({ ...e, t: 0 });
     if (e.type === 'splash') for (let i = 0; i < 14; i++) { const a = Math.random() * Math.PI * 2, s = 10 + Math.random() * 25; particles.push({ type: 'drop', x: e.x, y: e.y, vx: Math.cos(a) * s, vy: Math.sin(a) * s * 0.6, vz: 30 + Math.random() * 45, t: 0 }); }
   }
@@ -133,14 +240,14 @@ function frame(now) {
 function draw() {
   const S = zoom * dpr, camx = bird.x, camy = bird.y - bird.z, t = world.time;
   ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.imageSmoothingEnabled = false;
-  ctx.fillStyle = tone(HEX.blue, 'dark'); ctx.fillRect(0, 0, cw, ch);
+  ctx.fillStyle = world.room ? '#120f1c' : tone(HEX.blue, 'dark'); ctx.fillRect(0, 0, cw, ch);
   ctx.setTransform(S, 0, 0, S, Math.round(cw / 2 - camx * S), Math.round(ch / 2 - camy * S));
-  ctx.drawImage(groundCanvas, 0, 0);
+  ctx.drawImage(ground.canvas, 0, 0);
   const x0 = camx - cw / 2 / S - 40, x1 = camx + cw / 2 / S + 40, y0 = camy - ch / 2 / S - 20, y1 = camy + ch / 2 / S + 60;
   // the sea: wave crests coming and going (a little arc each), and waves running in to the shore: a line of foam where
   // the water is as shallow as each has got, fading as it reaches the sand; two at a time
   const wdx = world.wind.x * t * 0.9, wdy = world.wind.y * t * 0.9; // (the wind: the crests running along with it)
-  for (let j = Math.floor((y0 - wdy) / 14); j < (y1 - wdy) / 14; j++) for (let i = Math.floor((x0 - wdx) / 14); i < (x1 - wdx) / 14; i++) {
+  if (!world.room) for (let j = Math.floor((y0 - wdy) / 14); j < (y1 - wdy) / 14; j++) for (let i = Math.floor((x0 - wdx) / 14); i < (x1 - wdx) / 14; i++) {
     const h = hash(i, j, 3), f = Math.sin(t * 0.9 + h * 40);
     if (f < 0.3) continue;
     const x = Math.round(i * 14 + h * 9 + wdx) + Math.floor(((t * 0.9 + h * 40) % (Math.PI * 2)) * 0.8), y = Math.round(j * 14 + hash(i, j, 4) * 11 + wdy);
@@ -152,7 +259,7 @@ function draw() {
     const p = (t * 0.2 + k * 0.5) % 1, level = -0.034 + p * 0.033;
     ctx.fillStyle = `rgba(253,251,246,${Math.sin(p * Math.PI) * 0.8})`;
     for (let bj = Math.floor(y0 / 64); bj <= y1 / 64; bj++) for (let bi = Math.floor(x0 / 64); bi <= x1 / 64; bi++) {
-      const c = shallows.get(bi * 1000 + bj);
+      const c = ground.shallows.get(bi * 1000 + bj);
       if (c) for (let n = 0; n < c.length; n += 3) if (Math.abs(c[n + 2] - level) < 0.0016) ctx.fillRect(c[n], c[n + 1], 2, 2);
     }
   }
@@ -169,13 +276,18 @@ function draw() {
     ctx.fillRect(Math.round(f.x) - (across ? 3 : 1), Math.round(f.y) - (across ? 1 : 3), across ? 6 : 2, across ? 2 : 6);
   }
   for (const f of world.food) if (f.gone <= 0 && f.x > x0 && f.x < x1 && f.y > y0 && f.y < y1) {
-    const s = ART[f.kind], hop = f.run > 0 && f.kind === 'mouse' && Math.sin(t * 30 + f.x) > 0 ? 1 : 0; // (running: a scurry)
+    const bat = f.kind === 'bat', s = bat ? ART[Math.sin(t * 22 + f.x) > 0 ? 'bat' : 'bat1'] : ART[f.kind], hop = bat ? 8 : f.run > 0 && f.kind === 'mouse' && Math.sin(t * 30 + f.x) > 0 ? 1 : 0; // (running: a scurry; a bat: up, flapping)
+    if (bat) { ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.fillRect(Math.round(f.x) - 2, Math.round(f.y), 4, 1); }
     s.draw(ctx, Math.round(f.x - s.w / 2 + (f.kind === 'worm' && Math.sin(t * 4 + f.x) > 0 ? 1 : 0)), Math.round(f.y - s.h + 1 - hop), Math.cos(f.a) > 0);
+  }
+  for (const g of world.gems) if (!save.gems[`${world.seed}:${g.id}`]) { // (treasure, glinting)
+    ART.gem.draw(ctx, Math.round(g.x) - 3, Math.round(g.y) - 6);
+    if (Math.sin(t * 3 + g.id * 2) > 0.85) { ctx.fillStyle = HEX.white; ctx.fillRect(Math.round(g.x) + 1, Math.round(g.y) - 9, 1, 3); ctx.fillRect(Math.round(g.x), Math.round(g.y) - 8, 3, 1); }
   }
   // shadows, then all that stands, back to front (the eagle among it, or over it all when high)
   const seen = world.objects.filter((o) => o.x > x0 && o.x < x1 && o.y > y0 && o.y < y1);
   ctx.fillStyle = 'rgba(30,40,70,0.22)';
-  for (const o of seen) { ctx.beginPath(); ctx.ellipse(o.x + 2, o.y, o.block.w ? 18 : 6, o.block.w ? 4 : 2.5, 0, 0, Math.PI * 2); ctx.fill(); }
+  for (const o of seen) if (!o.cave) { ctx.beginPath(); ctx.ellipse(o.x + 2, o.y, o.block.w ? 18 : 6, o.block.w ? 4 : 2.5, 0, 0, Math.PI * 2); ctx.fill(); }
   for (const o of seen) if (o.perch && isWater(world, o.x, o.y)) { // (a rock in the sea: the water foaming round its foot)
     const f = (t * 0.5 + hash(o.x, o.y, 2)) % 1;
     ctx.strokeStyle = `rgba(253,251,246,${0.8 * (1 - f)})`; ctx.lineWidth = 1;
@@ -186,18 +298,25 @@ function draw() {
     const s = 1 - (bird.z / CRUISE) * 0.45; ctx.beginPath(); ctx.ellipse(bird.x + bird.z * 0.3, bird.y + bird.z * 0.15, 6 * s, 2.5 * s, 0, 0, Math.PI * 2); ctx.fill();
   }
   const high = bird.z >= 20, gust = world.weather === 'storm' ? 1.7 : world.weather === 'wind' ? 1 : 0;
-  const drawn = [...seen, ...(high ? [] : [{ bird: true, y: bird.y + 0.5 }])].sort((a, b) => a.y - b.y);
+  const others = me.room ? [] : save.eagles.filter((e) => e !== me && e.gx === me.gx && e.gy === me.gy && !e.room && e.bird.x > x0 && e.bird.x < x1 && e.bird.y > y0 && e.bird.y < y1);
+  const drawn = [...seen, ...others.map((e) => ({ other: e, y: e.bird.y + 0.5 })), ...(high ? [] : [{ bird: true, y: bird.y + 0.5 }])].sort((a, b) => a.y - b.y);
   for (const o of drawn) {
     if (o.bird) { drawBird(); continue; }
+    if (o.other) { const b = o.other.bird, p = eagle(b.state === 'air' ? 'glide' : 'stand', b.a, lookOf(o.other.look)); ctx.drawImage(p.canvas, Math.round(b.x - p.ox), Math.round(b.y - b.z - p.oy)); continue; } // (the other eagles here: where they were left)
     const s = o.art === 'fountain' ? ART[`fountain${Math.floor(t * 6) % 3}`] : ART[o.art];
     if (gust && /^(pine|oak|bush)/.test(o.art)) { // (the wind: trees and bushes leaning with it, swaying; the higher, the more)
       const k = (Math.sign(world.wind.x) * 0.06 + Math.sin(t * 2.6 + o.x * 0.05 + o.y * 0.03) * 0.07) * gust;
       ctx.save(); ctx.translate(o.x, o.y + 1); ctx.transform(1, 0, -k, 1, 0, 0); s.draw(ctx, -s.w / 2, -s.h); ctx.restore();
     } else s.draw(ctx, o.x - s.w / 2, o.y - s.h + 1);
-    if (o.nest) ART.nest.draw(ctx, o.x - ART.nest.w / 2, o.y - PERCH - ART.nest.h / 2);
+    if (o.nest) {
+      ART.nest.draw(ctx, o.x - ART.nest.w / 2, o.y - PERCH - ART.nest.h / 2);
+      const r = fam.residentOf(save, me.gx, me.gy), b = r?.brood; // (its egg, its chick)
+      if (b?.stage === 'egg') ART.egg.draw(ctx, o.x + 4, o.y - PERCH - 4);
+      if (b?.stage === 'chick') drawChick(ctx, o.x + 7 - 20, o.y - PERCH + 1 - 24, b.chick.grown, sky()[1] > 0.6 ? 'sleep' : 'stand', b.chick.ready ? lookOf(b.chick.look) : undefined);
+    }
   }
   // clouds: their shadows on the ground (in sunshine), the clouds up at CLOUD; high, the eagle over them, else under
-  const [, darkNow] = sky(), cl = CLOUDS[world.weather];
+  const [, darkNow] = sky(), cl = !world.room && CLOUDS[world.weather];
   if (cl && (world.weather === 'sun' || world.weather === 'wind')) layered(S, camx, camy, (g) => clouds(g, x0, x1, y0, y1, 0, '#000', null), 0.2 * wfade * (1 - darkNow), 35, 17);
   const over = Math.min(1, Math.max(0, (bird.z - CLOUD + 10) / 20)), cloudA = (0.25 + 0.67 * over) * wfade;
   if (high && bird.z > CLOUD) { if (cl) layered(S, camx, camy, (g) => clouds(g, x0, x1, y0, y1, CLOUD, cl[1], cl[2]), cloudA, 0, 0); drawBird(); }
@@ -212,7 +331,7 @@ function draw() {
   }
   // the time of day: the world tinted; at night the windows lit
   const [tint, dark] = sky();
-  if (dark > 0 || tint !== '#ffffff') {
+  if (world.room !== 'cave' && (dark > 0 || tint !== '#ffffff')) {
     ctx.globalCompositeOperation = 'multiply'; ctx.fillStyle = tint; ctx.fillRect(x0 - 50, y0 - 200, x1 - x0 + 100, y1 - y0 + 300); ctx.globalCompositeOperation = 'source-over';
     if (dark > 0.05) for (const o of seen) if (o.art.startsWith('house')) {
       const s = ART[o.art], sx = o.x - s.w / 2, sy = o.y - s.h + 1;
@@ -223,7 +342,7 @@ function draw() {
     }
   }
   // rain: rings on the water where the drops fall
-  if (world.weather === 'rain' || world.weather === 'storm') for (let i = 0; i < 60; i++) {
+  if (!world.room && (world.weather === 'rain' || world.weather === 'storm')) for (let i = 0; i < 60; i++) {
     const ph = t * 1.4 + hash(i, 2, 11), k = Math.floor(ph), p = ph - k, x = Math.round(x0 + hash(i, k, 12) * (x1 - x0)), y = Math.round(y0 + hash(i, k, 13) * (y1 - y0));
     if (!isWater(world, x, y)) continue;
     ctx.strokeStyle = `rgba(253,251,246,${0.6 * (1 - p) * wfade})`; ctx.lineWidth = 1;
@@ -247,7 +366,11 @@ function draw() {
     for (const [sx, sy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) { ctx.fillRect(x + sx * r - (sx > 0 ? 3 : 0), y + sy * r - (sy > 0 ? 1 : 0), 4, 1); ctx.fillRect(x + sx * r - (sx > 0 ? 1 : 0), y + sy * r - (sy > 0 ? 3 : 0), 1, 4); }
   }
   ctx.setTransform(1, 0, 0, 1, 0, 0);
-  weather(S);
+  if (!world.room) weather(S);
+  if (world.room === 'cave') { // (the dark: only round the eagle a little light)
+    const x = cw / 2, y = ch / 2, g = ctx.createRadialGradient(x, y, 25 * S, x, y, 95 * S);
+    g.addColorStop(0, 'rgba(8,6,14,0)'); g.addColorStop(1, 'rgba(8,6,14,0.96)'); ctx.fillStyle = g; ctx.fillRect(0, 0, cw, ch);
+  }
   if (bird.state === 'dive') { ctx.fillStyle = 'rgba(40,70,130,0.3)'; ctx.fillRect(0, 0, cw, ch); }
   hud(S, camx, camy);
 }
@@ -349,7 +472,7 @@ function layered(S, camx, camy, paint, a, ox, oy) {
 }
 
 function drawBird() {
-  const pic = eagle(poseOf(bird), bird.a), x = Math.round(bird.x), y = Math.round(bird.y - bird.z);
+  const pic = eagle(poseOf(bird), bird.a, look), x = Math.round(bird.x), y = Math.round(bird.y - bird.z);
   if (bird.state === 'swim') { ctx.strokeStyle = 'rgba(253,251,246,0.7)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.ellipse(x, y, 9 + Math.sin(world.time * 3), 3.5, 0, 0, Math.PI * 2); ctx.stroke(); }
   if (bird.stooping) { // (the wind: streaks behind it, up the screen)
     ctx.fillStyle = 'rgba(253,251,246,0.55)';
@@ -357,7 +480,7 @@ function drawBird() {
   }
   ctx.drawImage(pic.canvas, x - pic.ox, y - pic.oy);
   if (bird.prey && bird.state !== 'dive' && !(bird.state === 'swim' && bird.prey === 'fish')) { // (in its claws; eating: at its beak)
-    const s = ART[bird.prey], [bx, by] = bird.eating > 0 ? beak(bird.a) : [0, bird.state === 'air' ? 3 : 0];
+    const s = ART[bird.prey] || ART.mouse, [bx, by] = bird.eating > 0 ? beak(bird.a) : [0, bird.state === 'air' ? 3 : 0];
     s.draw(ctx, Math.round(x + bx - s.w / 2), Math.round(y + by - s.h / 2), Math.cos(bird.a) > 0);
   }
 }
@@ -372,22 +495,30 @@ function hud(S, camx, camy) {
   ctx.fillStyle = col; ctx.fillRect(pad + u, pad + u * 8, Math.round(bw * e), u * 4);
   ctx.fillStyle = tone(col, 'light'); ctx.fillRect(pad + u, pad + u * 8, Math.round(bw * e), u);
   if (bird.energy < 20 && Math.sin(world.time * 8) > 0) text(ctx, bird.state === 'air' ? 'HUNGER! JAGEN!' : 'HUNGER!', pad, pad + u * 15, HEX.red, 'left', u);
-  if (bird.prey && bird.state !== 'ground') text(ctx, 'ZUM FRESSEN AN LAND', pad, pad + u * 23, HEX.yellow, 'left', u);
+  const toChick = fam.hungry(me) && me.gx === me.home?.gx && me.gy === me.home?.gy && !me.room;
+  if (bird.prey && (bird.state !== 'ground' || (toChick && !bird.perch?.nest))) text(ctx, toChick ? 'INS NEST ZUM KÜKEN, ODER AN LAND FRESSEN' : 'ZUM FRESSEN AN LAND', pad, pad + u * 23, HEX.yellow, 'left', u);
+  text(ctx, me.home ? fam.broodSay(me) : 'FLIEG ÜBERS MEER: SUCH DIR EIN FREIES NEST', pad, pad + u * 31, 'rgba(253,251,246,0.85)', 'left', u);
   // prey eaten
   const n = `${bird.caught}`, fx = cw - pad - textWidth(n) * u;
   text(ctx, n, fx, pad, HEX.white, 'left', u);
   ctx.save(); ctx.translate(fx - u * 10, pad); ctx.scale(u, u); ART.mouse.draw(ctx, 0, 0); ctx.restore();
+  if (me.gems || world.room === 'cave') { const gn = `${me.gems}`, gx = cw - pad - textWidth(gn) * u; text(ctx, gn, gx, pad + u * 9, HEX.white, 'left', u); ctx.save(); ctx.translate(gx - u * 8, pad + u * 9); ctx.scale(u, u); ART.gem.draw(ctx, 0, 0); ctx.restore(); }
   // what happened: risen words where it caught something, numbers where it ate
   for (const p of particles) if (p.value || p.type === 'catch') {
     const sx = cw / 2 + (p.x - camx) * S, sy = ch / 2 + (p.y - camy - 8) * S - p.t * 30 * u;
     text(ctx, p.value ? `+${p.value}` : p.kind === 'fish' ? 'FISCH!' : 'GEFANGEN!', sx, sy, p.value ? HEX.white : HEX.yellow, 'center', u);
   }
+  for (const p of particles) if (p.type === 'feed' || p.type === 'gem') {
+    const sx = cw / 2 + (p.x - camx) * S, sy = ch / 2 + (p.y - camy - 8) * S - p.t * 30 * u;
+    text(ctx, p.type === 'gem' ? 'EIN SCHATZ!' : `FÜR ${me.brood.chick?.name || 'DAS KÜKEN'}!`, sx, sy, p.type === 'gem' ? HEX.lightGreen : HEX.yellow, 'center', u);
+  }
   for (const p of particles) if (p.type === 'miss' && p.t < 0.9) text(ctx, 'NICHTS...', cw / 2, ch / 2 - 30 * u, HEX.white, 'center', u);
   // the nest off the screen: an arrow at the edge pointing to it, the nest beside it
-  const nx = cw / 2 + (world.nest.x - camx) * S, ny = ch / 2 + (world.nest.y - PERCH - camy) * S, m = u * 14;
-  if (started && (nx < 0 || ny < 0 || nx > cw || ny > ch)) {
+  const nx = cw / 2 + (island.nest.x - camx) * S, ny = ch / 2 + (island.nest.y - PERCH - camy) * S, m = u * 14;
+  const nestMine = !me.room && [me, null].includes(fam.residentOf(save, me.gx, me.gy)); // (its own, or one free)
+  if (started && nestMine && (nx < 0 || ny < 0 || nx > cw || ny > ch)) {
     const dx = nx - cw / 2, dy = ny - ch / 2, k = Math.min((cw / 2 - m) / Math.abs(dx || 1e-6), (ch / 2 - m) / Math.abs(dy || 1e-6));
-    const ax = cw / 2 + dx * k, ay = Math.max(u * 26, ch / 2 + dy * k), a = Math.atan2(dy, dx); // (below the day's name, at the top)
+    const ax = cw / 2 + dx * k, ay = Math.max(u * 30, ch / 2 + dy * k), a = Math.atan2(dy, dx); // (below the day's name, at the top)
     ctx.save(); ctx.translate(ax, ay); ctx.rotate(a);
     ctx.fillStyle = HEX.yellow; ctx.strokeStyle = tone(HEX.charcoal, 'line'); ctx.lineWidth = u;
     ctx.beginPath(); ctx.moveTo(u * 8, 0); ctx.lineTo(-u * 4, -u * 6); ctx.lineTo(-u * 1, 0); ctx.lineTo(-u * 4, u * 6); ctx.closePath(); ctx.stroke(); ctx.fill();
@@ -396,13 +527,15 @@ function hud(S, camx, camy) {
     ctx.save(); ctx.translate(Math.round(ax - Math.cos(a) * u * 14 - (n.w * q) / 2), Math.round(ay - Math.sin(a) * u * 12 - (n.h * q) / 2)); ctx.scale(q, q); n.draw(ctx, 0, 0); ctx.restore();
   }
   // the day and its weather; a new day: what it brings
-  const [wname, wsay] = SAY[world.weather];
-  text(ctx, `TAG ${dayN}: ${wname}`, cw / 2, pad, HEX.white, 'center', u);
+  const [wname, wsay] = SAY[island.weather];
+  text(ctx, `TAG ${me.dayN}: ${wname}`, cw / 2, pad, HEX.white, 'center', u);
+  text(ctx, `${me.name}, ${me.room?.kind === 'cave' ? 'IN DER HÖHLE' : me.room ? 'IN DER SCHEUNE' : `INSEL ${islandName(me.gx, me.gy)}`}`, cw / 2, pad + u * 9, 'rgba(253,251,246,0.75)', 'center', u);
   if (banner > 0 && started) {
     const a = Math.min(1, banner, 6 - banner), big = u * 2;
-    text(ctx, `TAG ${dayN}: ${wname}`, cw / 2, ch * 0.22, `rgba(253,251,246,${a})`, 'center', big);
+    text(ctx, `TAG ${me.dayN}: ${wname}`, cw / 2, ch * 0.22, `rgba(253,251,246,${a})`, 'center', big);
     text(ctx, wsay, cw / 2, ch * 0.22 + big * 9, `rgba(255,226,90,${a})`, 'center', u);
   }
+  if (notice?.t > 0 && started) text(ctx, notice.text, cw / 2, ch * 0.42, `rgba(255,226,90,${Math.min(1, notice.t)})`, 'center', u);
   if (bird.asleep) for (let i = 0; i < 3; i++) { // (asleep: Z z z rising)
     const f = (world.time * 0.6 + i / 3) % 1;
     text(ctx, 'Z', cw / 2 + (8 + f * 10) * u, ch / 2 - (14 + f * 22) * u, `rgba(253,251,246,${1 - f})`, 'left', Math.round(u * (1 + f)));
@@ -435,9 +568,14 @@ function title(u) {
   const big = u * 4;
   text(ctx, 'VON OBEN', cw / 2 + big / 2, ch * 0.3 + big / 2, tone(HEX.charcoal, 'line'), 'center', big);
   text(ctx, 'VON OBEN', cw / 2, ch * 0.3, HEX.white, 'center', big);
-  const lines = ['LINKS: DREHEN', 'RECHTS: GEHEN, RENNEN, FLIEGEN', 'LOSLASSEN: LANDEN', 'IM FLUG NACH UNTEN: STURZFLUG', '', 'FLIEGEN KOSTET ENERGIE.', 'JAGE MÄUSE, KÄFER, WÜRMER UND FISCHE IM STURZFLUG!', 'GEFRESSEN WIRD AN LAND.', 'IM NEST AUF DEM FELSEN SCHLAFEN: VOLLE ENERGIE', 'JEDES WETTER LOCKT ANDERE TIERE HERAUS.', '', 'TIPPEN ZUM STARTEN'];
+  const lines = ['LINKS: DREHEN', 'RECHTS: GEHEN, RENNEN, FLIEGEN', 'LOSLASSEN: LANDEN', 'IM FLUG NACH UNTEN: STURZFLUG', '', 'FLIEGEN KOSTET ENERGIE.', 'JAGE MÄUSE, KÄFER, WÜRMER UND FISCHE IM STURZFLUG!', 'GEFRESSEN WIRD AN LAND.', 'IM NEST AUF DEM FELSEN SCHLAFEN: VOLLE ENERGIE', 'JEDES WETTER LOCKT ANDERE TIERE HERAUS.', 'NACH 5 TAGEN LIEGT EIN EI IM NEST: FÜTTERE DAS KÜKEN!', 'HÖHLEN UND SCHEUNEN: HINEIN!', '', 'TIPPEN ZUM STARTEN'];
   text(ctx, VERSION, cw - u * 4, ch - u * 10, HEX.white, 'right', u);
   lines.forEach((l, i) => text(ctx, l, cw / 2, ch * 0.3 + big * 9 + i * Math.round(u * 1.5) * 9, i === lines.length - 1 && Math.sin(world.time * 4) < 0 ? HEX.yellow : HEX.white, 'center', Math.round(u * 1.5)));
 }
 
+play(fam.current(save));
+if (fresh) { // (the first time: the nest, and a name for the first eagle)
+  const pic = picture((g) => { ART.crag.draw(g, 8, 60 - ART.crag.h); ART.nest.draw(g, 30 - ART.nest.w / 2, 60 - PERCH - ART.nest.h / 2 - 1); const p = eagle('stand', Math.PI * 0.35, look); g.drawImage(p.canvas, 30 - p.ox, 60 - PERCH - p.oy); }, 60, 62, 4);
+  ui.ask('VON OBEN', pic, 'WIE HEISST DEIN ADLER?').then((n) => { me.name = n; fam.store(save); say(`${n}: INSEL ${islandName(0, 0)}`); });
+}
 requestAnimationFrame(frame);

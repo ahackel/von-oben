@@ -1,9 +1,8 @@
 // The island, without a screen: its ground (a grid of 2 px cells: sea, sand, grass, path), what stands on it (trees,
 // bushes, houses, a fountain), what lies about to eat (mice, beetles, worms) and the fish in the sea. Units: art pixels.
 export const W = 2560, H = 1920, CELL = 2, SEA = 1200; // (the island's map; the sea goes on SEA px beyond it all round)
-export const DEEP = 0, WATER = 1, SAND = 2, GRASS = 3, PATH = 4, ROCK = 5, SNOW = 6;
+export const DEEP = 0, WATER = 1, SAND = 2, GRASS = 3, PATH = 4, ROCK = 5, SNOW = 6, FLOOR = 7, WALL = 8, CAVE = 9; // (FLOOR: a barn's straw; CAVE: a cave's floor; WALL: their walls)
 export const PERCH = 38; // (how high the top of the nest's rock is)
-const GW = W / CELL, GH = H / CELL;
 
 export function rng(seed) { // (mulberry32: the same island every time)
   return () => { seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), seed | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
@@ -17,26 +16,33 @@ function noise(x, y, s) {
 const fbm = (x, y, s) => noise(x, y, s) * 0.55 + noise(x * 2.1, y * 2.1, s + 1) * 0.3 + noise(x * 4.3, y * 4.3, s + 2) * 0.15;
 // height above the sea (below 0: sea): noise, falling off towards the map's edges
 export const MOUNT = 0.3; // (from this height: the mountains, bare rock, snow on top)
-const elevationAt = (x, y, s) => { const nx = (x / W) * 2 - 1, ny = (y / H) * 2 - 1; return fbm(x / 350, y / 350, s) - 0.1 - Math.hypot(nx, ny * 1.05) * 0.62; };
+// each island its own shape, by its seed: how fast the land falls away to the edges, how much of it is above the sea
+const shapeOf = (s) => (s === 7 ? { fall: 0.62, lift: 0.1, sq: 1.05 } : { fall: 0.5 + hash(s, 1, 3) * 0.3, lift: 0.05 + hash(s, 2, 3) * 0.11, sq: 0.8 + hash(s, 3, 3) * 0.5 });
+const elevationAt = (x, y, s, p) => { const nx = (x / W) * 2 - 1, ny = (y / H) * 2 - 1; return fbm(x / 350, y / 350, s) - p.lift - Math.hypot(nx, ny * p.sq) * p.fall; };
+// the islands lie in a grid in the sea, each one the same for everyone: (0, 0) the first
+export const islandSeed = (gx, gy) => (gx === 0 && gy === 0 ? 7 : 1 + Math.floor(hash(gx, gy, 99) * 1e9));
+const SYL = [['MÖWEN', 'FELSEN', 'ADLER', 'WIND', 'MOOS', 'NEBEL', 'KIEFERN', 'STURM', 'SONNEN', 'KRÄHEN', 'BIRKEN', 'MUSCHEL'], ['HOLM', 'OOG', 'AU', 'SAND', 'WERDER', 'KLIPP', 'INSEL', 'RIFF']];
+export const islandName = (gx, gy) => SYL[0][Math.floor(hash(gx, gy, 41) * 12)] + SYL[1][Math.floor(hash(gx, gy, 42) * 8)];
+const GW = W / CELL, GH = H / CELL;
 
 export function makeWorld(seed = 7) {
-  const rand = rng(seed), elev = new Float32Array(GW * GH), ground = new Uint8Array(GW * GH);
+  const rand = rng(seed), elev = new Float32Array(GW * GH), ground = new Uint8Array(GW * GH), shape = shapeOf(seed);
   // small islands out in the sea: a hill each, raised from the sea floor (the highest bare rock on top)
   const isles = [];
   for (let n = 0; n < 500 && isles.length < 8; n++) {
-    const r = 40 + rand() * 75, x = r + 30 + rand() * (W - 2 * r - 60), y = r + 30 + rand() * (H - 2 * r - 60), base = elevationAt(x, y, seed);
+    const r = 40 + rand() * 75, x = r + 30 + rand() * (W - 2 * r - 60), y = r + 30 + rand() * (H - 2 * r - 60), base = elevationAt(x, y, seed, shape);
     if (base < -0.14 && isles.every((o) => Math.hypot(o.x - x, o.y - y) > o.r + r + 120)) isles.push({ x, y, r, top: 0.05 + rand() * 0.3 - base });
   }
   for (let j = 0; j < GH; j++) for (let i = 0; i < GW; i++) {
     const x = i * CELL, y = j * CELL, k = j * GW + i;
-    let e = elevationAt(x, y, seed);
+    let e = elevationAt(x, y, seed, shape);
     for (const o of isles) if (Math.abs(x - o.x) < o.r * 1.3 && Math.abs(y - o.y) < o.r * 1.3) {
       const d = Math.hypot(x - o.x, y - o.y) / (o.r * (0.75 + noise(x / 30, y / 30, seed + 5) * 0.5));
       if (d < 1) e += o.top * (1 - d * d) ** 1.5;
     }
     elev[k] = e; ground[k] = e < -0.07 ? DEEP : e < 0 ? WATER : e < 0.035 ? SAND : e < MOUNT ? GRASS : e < MOUNT + 0.12 ? ROCK : SNOW;
   }
-  const w = { seed, rand, elev, ground, objects: [], food: [], fish: [], buckets: new Map(), time: 0, weather: 'sun', wind: { x: 0, y: 0 } };
+  const w = { seed, rand, elev, ground, W, H, gw: GW, gh: GH, out: DEEP, objects: [], food: [], fish: [], gems: [], buckets: new Map(), time: 0, weather: 'sun', wind: { x: 0, y: 0 } };
   const at = (x, y) => terrain(w, x, y);
   // the village: a street of paths through the grass nearest the middle, houses along it, a fountain on it
   let vx = W / 2, vy = H / 2;
@@ -73,6 +79,15 @@ export function makeWorld(seed = 7) {
     const x = 80 + rand() * (W - 160), y = 80 + rand() * (H - 160);
     if (clearFor(w, x, y, 80) && Math.hypot(x - nest.x, y - nest.y) > 80 && at(x - 26, y + 6) === GRASS && at(x + 26, y + 6) === GRASS) add(w, house(x, y, rand));
   }
+  // barns in the fields (their door open, at the front), caves in the mountains' rock faces
+  for (let n = 0, made = 0; n < 300 && made < 3; n++) {
+    const x = Math.round(100 + rand() * (W - 200)), y = Math.round(100 + rand() * (H - 200));
+    if (clearFor(w, x, y, 70) && [-34, 0, 34].every((d) => at(x + d, y + 8) === GRASS && at(x + d, y - 30) === GRASS)) add(w, { art: 'barn', x, y, block: { w: 64, d: 26 }, door: true, room: `barn${made++}` });
+  }
+  for (let y = 40, made = 0; y < H - 40 && made < 2; y += 24) for (let x = 40; x < W - 40 && made < 2; x += 24) {
+    if (at(x, y) === ROCK && at(x, y + 16) >= GRASS && at(x, y + 16) <= ROCK && at(x, y - 20) >= ROCK && Math.hypot(x - nest.x, y - nest.y) > 200 && clearFor(w, x, y, 30)
+      && w.objects.every((o) => !o.cave || Math.hypot(o.x - x, o.y - y) > 500) && hash(x, y, seed) < 0.3) add(w, { art: 'cave', x, y, block: { r: 1 }, cave: true, room: `cave${made++}` });
+  }
   for (let y = 16; y < H; y += 20) for (let x = 16; x < W; x += 20) {
     const px = x + (rand() - 0.5) * 14, py = y + (rand() - 0.5) * 14;
     if (!clearFor(w, px, py, 18) || Math.hypot(px - nest.x, py - nest.y) < 40) continue;
@@ -93,13 +108,13 @@ export function makeWorld(seed = 7) {
 
 export function terrain(w, x, y) {
   const i = Math.floor(x / CELL), j = Math.floor(y / CELL);
-  return i < 0 || j < 0 || i >= GW || j >= GH ? DEEP : w.ground[j * GW + i];
+  return i < 0 || j < 0 || i >= w.gw || j >= w.gh ? w.out : w.ground[j * w.gw + i];
 }
 export const isWater = (w, x, y) => terrain(w, x, y) <= WATER;
-export const elevation = (w, x, y) => { const i = Math.floor(x / CELL), j = Math.floor(y / CELL); return i < 0 || j < 0 || i >= GW || j >= GH ? -1 : w.elev[j * GW + i]; };
+export const elevation = (w, x, y) => { const i = Math.floor(x / CELL), j = Math.floor(y / CELL); return !w.elev || i < 0 || j < 0 || i >= w.gw || j >= w.gh ? -1 : w.elev[j * w.gw + i]; };
 
 function paint(w, x, y, ww, hh, t) {
-  for (let j = Math.floor(y / CELL); j < (y + hh) / CELL; j++) for (let i = Math.floor(x / CELL); i < (x + ww) / CELL; i++) if (i >= 0 && j >= 0 && i < GW && j < GH) w.ground[j * GW + i] = t;
+  for (let j = Math.floor(y / CELL); j < (y + hh) / CELL; j++) for (let i = Math.floor(x / CELL); i < (x + ww) / CELL; i++) if (i >= 0 && j >= 0 && i < w.gw && j < w.gh) w.ground[j * w.gw + i] = t;
 }
 // a house: its bottom middle at (x, y); it stands on a footprint 52 wide, 22 deep
 const house = (x, y, rand) => ({ art: `house${Math.floor(rand() * 3)}`, x: Math.round(x), y: Math.round(y), block: { w: 52, d: 22 } });
@@ -117,20 +132,22 @@ function near(w, x, y, f) {
 }
 // is (x, y) in something that stands in the way (a tree's trunk, a house's walls)?
 export function blocked(w, x, y) {
-  return !!near(w, x, y, (o) => o.block.r ? Math.hypot(o.x - x, o.y - y) < o.block.r : Math.abs(o.x - x) < o.block.w / 2 && y < o.y + 1 && y > o.y - o.block.d);
+  return terrain(w, x, y) === WALL || !!near(w, x, y, (o) => o.block.r ? Math.hypot(o.x - x, o.y - y) < o.block.r : Math.abs(o.x - x) < o.block.w / 2 && y < o.y + 1 && y > o.y - o.block.d && !(o.door && Math.abs(o.x - x) < 8));
 }
+// the door of a barn (x, y) has gone in at, or the mouth of a cave flown or walked into (low)
+export const doorAt = (w, x, y, z) => near(w, x, y, (o) => (o.door && z === 0 && Math.abs(o.x - x) < 8 && y < o.y - 2 && y > o.y - o.block.d) || (o.cave && z < 25 && Math.hypot(o.x - x, (o.y - y) * 1.5) < 16));
 const clearFor = (w, x, y, r) => !near(w, x, y, (o) => Math.hypot(o.x - x, o.y - y) < r + (o.block.w || 0) / 2);
 // somewhere for it (x, y): random, on ground that suits it, clear of what stands there
 function spot(w, it, ok) {
   for (let n = 0; n < 200; n++) {
-    const x = 20 + w.rand() * (W - 40), y = 20 + w.rand() * (H - 40);
+    const x = 20 + w.rand() * (w.W - 40), y = 20 + w.rand() * (w.H - 40);
     if (ok(terrain(w, x, y)) && !blocked(w, x, y)) { it.x = x; it.y = y; return it; }
   }
   it.x = w.village?.x ?? W / 2; it.y = w.village?.y ?? H / 2; return it;
 }
-export const FOOD = { mouse: 25, beetle: 12, worm: 10, lizard: 18, frog: 20, fish: 35 }; // (energy, eaten)
-const SPEED = { mouse: 34, beetle: 14, worm: 4, lizard: 42, frog: 24 }; // (running away)
-const fits = (kind) => (t) => t === GRASS || ((kind === 'beetle' || kind === 'lizard') && (t === SAND || t === ROCK)) || (kind === 'frog' && t === SAND);
+export const FOOD = { mouse: 25, beetle: 12, worm: 10, lizard: 18, frog: 20, bat: 22, fish: 35 }; // (energy, eaten)
+const SPEED = { mouse: 34, beetle: 14, worm: 4, lizard: 42, frog: 24, bat: 55 }; // (running away)
+const fits = (kind) => (t) => t === GRASS || t === FLOOR || t === CAVE || ((kind === 'beetle' || kind === 'lizard') && (t === SAND || t === ROCK)) || (kind === 'frog' && t === SAND);
 // the weather, a day each: which animals it brings out (how many of each, of all there are)
 export const WEATHER = {
   sun: { mouse: 0.3, beetle: 0.25, lizard: 0.45 },
@@ -139,6 +156,7 @@ export const WEATHER = {
   wind: { mouse: 0.35, beetle: 0.4, worm: 0.25 },
   snow: { mouse: 0.75, beetle: 0.25 },
   storm: { frog: 0.5, worm: 0.5 },
+  cave: { bat: 0.65, beetle: 0.35 }, barn: { mouse: 1 }, // (inside: always the same)
 };
 // a new day's weather: what lies about now (most of it) hides, other animals come out; the wind (px/s) blowing
 export function setWeather(w, kind) {
@@ -180,9 +198,9 @@ export function update(w, dt, b) {
     if (f.gone > 0) { if ((f.gone -= dt) <= 0) placeFood(w, f); continue; }
     if (b && f.run <= 0 && f.scare <= 0 && b.z < 30 && Math.hypot(f.x - b.x, f.y - b.y) < 55) f.scare = 0.25;
     if (f.scare > 0 && (f.scare -= dt) <= 0 && b) { f.run = 1.5; f.a = Math.atan2(f.y - b.y, f.x - b.x) + (w.rand() - 0.5); }
-    const v = f.run > 0 ? SPEED[f.kind] : f.kind === 'worm' ? 0.5 : 2;
+    const v = f.run > 0 ? SPEED[f.kind] : f.kind === 'worm' ? 0.5 : f.kind === 'bat' ? 26 : 2; // (bats: always flitting about)
     if (f.run > 0) f.run -= dt;
-    f.a += (w.rand() - 0.5) * (f.run > 0 ? 3 : 5) * dt;
+    f.a += (w.rand() - 0.5) * (f.run > 0 ? 3 : f.kind === 'bat' ? 14 : 5) * dt;
     const nx = f.x + Math.cos(f.a) * v * dt, ny = f.y + Math.sin(f.a) * v * dt;
     if (fits(f.kind)(terrain(w, nx, ny)) && !blocked(w, nx, ny)) { f.x = nx; f.y = ny; } else f.a += Math.PI * (0.5 + w.rand());
   }
@@ -192,4 +210,35 @@ export function update(w, dt, b) {
     const nx = f.x + Math.cos(f.a) * 10 * dt, ny = f.y + Math.sin(f.a) * 10 * dt;
     if (isWater(w, nx, ny)) { f.x = nx; f.y = ny; } else f.a += Math.PI * (0.6 + w.rand() * 0.8);
   }
+}
+
+// inside: a cave (tunnels dug by a wandering walk from its mouth, dark, bats and beetles, treasure to find) or a barn
+// (a room of straw, hay bales, beams up to sit on, mice everywhere). Low: the eagle flies no higher than its roof
+export function makeRoom(kind, seed) {
+  const cave = kind === 'cave', RW = cave ? 1000 : 340, RH = cave ? 760 : 230, gw = RW / CELL, gh = RH / CELL, rand = rng(seed);
+  const w = { seed, rand, elev: null, ground: new Uint8Array(gw * gh).fill(WALL), W: RW, H: RH, gw, gh, out: WALL, objects: [], food: [], fish: [], gems: [], buckets: new Map(),
+    time: 0, weather: kind, wind: { x: 0, y: 0 }, room: kind, roof: cave ? 22 : PERCH + 12, exit: { x: RW / 2, y: RH - 14 } };
+  const dig = (x, y, r) => { for (let j = Math.floor((y - r) / CELL); j <= (y + r) / CELL; j++) for (let i = Math.floor((x - r) / CELL); i <= (x + r) / CELL; i++) if (i > 3 && j > 3 && i < gw - 4 && j < gh - 1 && Math.hypot(i * CELL - x, j * CELL - y) < r) w.ground[j * gw + i] = cave ? CAVE : FLOOR; };
+  if (cave) {
+    const walk = (x, y, a, n) => {
+      for (let k = 0; k < n; k++) {
+        a += (rand() - 0.5) * 1.1; x += Math.cos(a) * 12; y += Math.sin(a) * 12;
+        if (x < 60 || x > RW - 60) a = Math.PI - a; if (y < 60 || y > RH - 90) a = -a;
+        x = Math.max(50, Math.min(RW - 50, x)); y = Math.max(50, Math.min(RH - 80, y));
+        dig(x, y, 16 + rand() * 18);
+        if (rand() < 0.03 && n > 30) walk(x, y, a + (rand() < 0.5 ? 1.4 : -1.4), Math.floor(n / 3));
+      }
+    };
+    for (let y = RH; y > RH - 100; y -= 8) dig(RW / 2, y, 18); // (the way in, from the mouth)
+    walk(RW / 2, RH - 100, -Math.PI / 2, 140);
+  } else {
+    for (let y = 16; y < RH - 14; y += 6) for (let x = 16; x < RW - 16; x += 6) dig(x, y, 6);
+    for (let y = RH - 16; y < RH; y += 4) dig(RW / 2, y, 9); // (the door)
+    for (const [x, y] of [[50, 70], [290, 70], [60, 170], [280, 165], [120, 60]]) add(w, { art: 'hay', x, y, block: { w: 28, d: 12 } });
+    for (const x of [100, 170, 240]) add(w, { art: 'beam', x, y: 118, block: { r: 4 }, perch: true });
+  }
+  const floor = (t) => t === CAVE || t === FLOOR;
+  for (let n = 0; n < (cave ? 24 : 16); n++) w.food.push(placeFood(w, { gone: 0 }));
+  for (let n = 0; n < (cave ? 7 : 0); n++) { const g = spot(w, { id: n }, floor); if (Math.hypot(g.x - w.exit.x, g.y - w.exit.y) > 150) w.gems.push(g); }
+  return w;
 }

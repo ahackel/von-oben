@@ -1,33 +1,44 @@
 // The bald eagle's pictures, in 16 directions and each pose: built of little lumps (ellipsoids) in 3D, turned, looked
 // at from the front and above like the island, and laid down as pixels: lit from the top left (light, base, shade,
 // dark tones of Lop Hop's palette), with an outline in each color's line tone, as pixels.js draws by hand.
-import { HEX, tone } from './pixels.js';
+import { HEX, tone, mix } from './pixels.js';
+import { hash } from './world.js';
 
 const KY = 0.75, KZ = 0.68, SIZE = 1.4; // (the view: a step back in y is KY pixels up the screen, a step up KZ)
 const LIGHT = (() => { const l = [-0.45, -0.55, 1]; const n = Math.hypot(...l); return l.map((v) => v / n); })();
 // a pose's lumps, in the eagle's own frame: x forwards, y to its right, z up; each [center, radii, color, roll (a wing's,
 // round its shoulder)]
-function lumps(pose) {
+// each eagle a little different, by its number (0: the first, as it always was): its brown, its head's white, its size,
+// its head's and beak's; a chick (grown: days fed) small and grey, a big head
+export function lookOf(n, chick = null) {
+  if (chick) return { key: `c${chick}`, body: HEX.lightGrey, wing: HEX.blueGrey, head: HEX.white, size: 0.75 + chick * 0.1, headR: 1.3, beak: 0.7 };
+  if (!n) return { key: '0', body: HEX.darkBrown, wing: HEX.deepBrown, head: HEX.white, size: SIZE, headR: 1, beak: 1 };
+  const h = (k) => hash(n, k, 61), other = [HEX.brown, HEX.deepBrown, HEX.rust, HEX.charcoal][Math.floor(h(1) * 4)];
+  return { key: `${n}`, body: mix(HEX.darkBrown, other, 0.15 + h(2) * 0.45), wing: mix(HEX.deepBrown, other, h(3) * 0.45), head: mix(HEX.white, [HEX.cream, HEX.lightGrey, HEX.beige][Math.floor(h(4) * 3)], h(5) * 0.7),
+    size: 1.28 + h(6) * 0.24, headR: 0.88 + h(7) * 0.3, beak: 0.8 + h(8) * 0.45 };
+}
+function lumps(pose, look) {
   const L = [], add = (c, r, col, roll = 0, side = 1) => L.push({ c, r, col, roll, side });
   const bob = pose.legs === 'walk0' || pose.legs === 'walk1' ? 0.5 : 0, z0 = pose.legs ? 0 : pose.swim ? -2.4 : pose.sleep ? -2.6 : 0;
   const hx = pose.sleep ? -1.6 : 0, hz = pose.sleep ? -1.8 : 0; // (asleep: its head sunk, drawn back into its shoulders)
   const body = (dx, dz) => [dx, 0, 6 + dz + z0 - bob];
-  add(body(0, 0), [5, 3, 3], 'darkBrown');
-  add(body(5.2 + hx, 3 + hz), [2.5, 2.2, 2.3], 'white'); // head
-  add(body(7.6 + hx, 2.5 + hz), [1.5, 0.8, 0.8], 'yellow'); // beak
-  add(body(-6.2, -0.4), [2.8, 2.1, 0.8], 'white'); // tail
+  const hr = look.headR, bk = look.beak;
+  add(body(0, 0), [5, 3, 3], look.body);
+  add(body(5.2 + hx, 3 + hz), [2.5 * hr, 2.2 * hr, 2.3 * hr], look.head); // head
+  add(body(5.2 + 2.4 * hr + (bk - 1) * 1.5 + hx, 2.5 + hz), [1.5 * bk, 0.8 * bk, 0.8 * bk], 'yellow'); // beak
+  add(body(-6.2, -0.4), [2.8, 2.1, 0.8], look.head); // tail
   for (const s of [1, -1]) {
-    if (!pose.sleep) L.push({ c: [6.4, s * 1.5, 9.4 + z0 - bob], r: [0.5, 0.5, 0.5], col: 'black' }); // eye (shut, asleep)
+    if (!pose.sleep) L.push({ c: [5.2 + 1.2 * hr, s * 1.5 * hr, 6 + 3 + 0.4 * hr + z0 - bob], r: [0.5, 0.5, 0.5], col: 'black' }); // eye (shut, asleep)
     if (pose.stoop) { // (stooping: the wings drawn in tight along its back, swept up; the legs out, talons first)
-      add([-2, s * 2.4, 7.6], [5.6, 1.2, 1.5], 'deepBrown');
-      add([-6.2, s * 1.6, 7.9], [2.6, 0.8, 0.8], 'deepBrown');
-      add([2.4, s * 1.4, 2.8], [1.4, 0.8, 1], 'darkBrown');
+      add([-2, s * 2.4, 7.6], [5.6, 1.2, 1.5], look.wing);
+      add([-6.2, s * 1.6, 7.9], [2.6, 0.8, 0.8], look.wing);
+      add([2.4, s * 1.4, 2.8], [1.4, 0.8, 1], look.body);
       add([4.4, s * 1.3, 1.9], [1.5, 0.6, 0.6], 'yellow');
       L.push({ c: [5.7, s * 1.3, 1.5], r: [0.5, 0.5, 0.5], col: 'black' });
       continue;
     }
-    if (pose.wings === undefined) add([-0.6, s * 2.6, 6.6 + z0 - bob], [4.8, 1, 2.2], 'deepBrown'); // folded
-    else add([-0.4, s * 7.2, 6.8], [3.2, 6.6, 0.7], 'deepBrown', pose.wings, s); // spread
+    if (pose.wings === undefined) add([-0.6, s * 2.6, 6.6 + z0 - bob], [4.8, 1, 2.2], look.wing); // folded
+    else add([-0.4, s * 7.2, 6.8], [3.2, 6.6, 0.7], look.wing, pose.wings, s); // spread
     if (pose.legs) {
       const f = pose.legs === 'walk0' ? s : pose.legs === 'walk1' ? -s : 0;
       add([0.5 + f * 1.2, s * 1.3, 1.6], [0.6, 0.6, 1.7], 'yellow');
@@ -37,12 +48,12 @@ function lumps(pose) {
 }
 
 // a picture of the pose, facing a (radians): { canvas, ox, oy (where its feet are, in it) }
-function render(pose, a) {
+function render(pose, a, look) {
   const ca = Math.cos(a), sa = Math.sin(a), pitch = pose.dive ? 1.1 : pose.stoop ? 0.45 : 0, cp = Math.cos(pitch), sp = Math.sin(pitch);
   const px = new Map(); // ("x,y" → [depth, color, base])
-  for (const { c: c0, r: r0, col, roll = 0, side = 1 } of lumps(pose)) {
-    const c = c0.map((v) => v * SIZE), r = r0.map((v) => v * SIZE);
-    const base = HEX[col], cr = Math.cos(roll), sr = Math.sin(roll);
+  for (const { c: c0, r: r0, col, roll = 0, side = 1 } of lumps(pose, look)) {
+    const c = c0.map((v) => v * look.size), r = r0.map((v) => v * look.size);
+    const base = col[0] === '#' ? col : HEX[col], cr = Math.cos(roll), sr = Math.sin(roll);
     for (let lx = -r[0]; lx <= r[0]; lx += 0.4) for (let ly = -r[1]; ly <= r[1]; ly += 0.4) for (let lz = -r[2]; lz <= r[2]; lz += 0.4) {
       const q = (lx / r[0]) ** 2 + (ly / r[1]) ** 2 + (lz / r[2]) ** 2;
       if (q > 1) continue;
@@ -53,7 +64,7 @@ function render(pose, a) {
         n = [n[0], n[1] * cr - side * n[2] * sr, side * n[1] * sr + n[2] * cr];
       }
       if (pitch) { // (diving: nose down, round its middle)
-        const x = p[0], z = p[2] - 6 * SIZE; p = [x * cp + z * sp, p[1], 1 - x * sp + z * cp];
+        const x = p[0], z = p[2] - 6 * look.size; p = [x * cp + z * sp, p[1], 1 - x * sp + z * cp];
         n = [n[0] * cp + n[2] * sp, n[1], -n[0] * sp + n[2] * cp];
       }
       if ((pose.swim || pose.dive) && p[2] < 0) continue; // (under the water)
@@ -85,11 +96,11 @@ const POSES = {
   stand: { legs: 'stand' }, sleep: { sleep: true }, walk0: { legs: 'walk0' }, walk1: { legs: 'walk1' }, swim: { swim: true }, dive: { dive: true }, stoop: { stoop: true },
   glide: { wings: 0.08 }, fly0: { wings: 0.6 }, fly1: { wings: 0.2 }, fly2: { wings: -0.35 }, fly3: { wings: 0.05 },
 };
-const made = new Map();
+const made = new Map(), LOOK0 = lookOf(0);
 // the picture for a pose, facing the nearest of the 16 directions to a
-export function eagle(pose, a) {
-  const d = ((Math.round(a / ((Math.PI * 2) / DIRS)) % DIRS) + DIRS) % DIRS, k = pose + d;
-  if (!made.has(k)) made.set(k, render(POSES[pose], (d * Math.PI * 2) / DIRS));
+export function eagle(pose, a, look = LOOK0) {
+  const d = ((Math.round(a / ((Math.PI * 2) / DIRS)) % DIRS) + DIRS) % DIRS, k = pose + d + '/' + look.key;
+  if (!made.has(k)) made.set(k, render(POSES[pose], (d * Math.PI * 2) / DIRS, look));
   return made.get(k);
 }
 // which pose the bird is in
