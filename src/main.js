@@ -17,8 +17,9 @@ const DAY = 240, SKY = [[0, '#ffffff', 0], [0.42, '#ffffff', 0], [0.5, mix('#fff
   [0.62, '#55609e', 1], [0.85, '#55609e', 1], [0.92, mix('#ffffff', '#ffb4c4', 0.5), 0.25], [1, '#ffffff', 0]];
 let day = 0.08;
 // the weather: each day (from the morning) another; what it is called, which animals it brings out
-const WEATHERS = ['sun', 'rain', 'fog', 'wind'], SAY = { sun: ['SONNE', 'EIDECHSEN SONNEN SICH'], rain: ['REGEN', 'WÜRMER UND FRÖSCHE KOMMEN RAUS'],
-  fog: ['NEBEL', 'DIE MÄUSE WAGEN SICH RAUS'], wind: ['WIND', 'KÄFER KRABBELN, DER WIND TREIBT DICH AB'] };
+const WEATHERS = ['sun', 'rain', 'fog', 'wind', 'snow', 'storm'], SAY = { sun: ['SONNE', 'EIDECHSEN SONNEN SICH'], rain: ['REGEN', 'WÜRMER UND FRÖSCHE KOMMEN RAUS'],
+  fog: ['NEBEL', 'DIE MÄUSE WAGEN SICH RAUS'], wind: ['WIND', 'KÄFER KRABBELN, DER WIND TREIBT DICH AB'],
+  snow: ['SCHNEE', 'MÄUSE IM SCHNEE SIEHT MAN GUT'], storm: ['GEWITTER', 'FRÖSCHE UND WÜRMER, ABER STURM!'] };
 let dayN = 1, wfade = 1, banner = 0;
 function newDay() {
   dayN++;
@@ -31,7 +32,7 @@ function sky() {
   return [mix(c0, c1, e), d0 + (d1 - d0) * e];
 }
 globalThis.vonOben = { bird, world, setDay: (d) => (day = d), newDay }; // (to look into, from the console)
-const ZOOM_GROUND = 4, ZOOM_AIR = 1.5, VERSION = 'V10'; // (on the title: is the new code there?)
+const ZOOM_GROUND = 4, ZOOM_AIR = 1.5, VERSION = 'V11'; // (on the title: is the new code there?)
 
 function resize() {
   dpr = window.devicePixelRatio || 1; cw = cv.width = Math.round(innerWidth * dpr); ch = cv.height = Math.round(innerHeight * dpr);
@@ -210,7 +211,7 @@ function draw() {
     }
   }
   // rain: rings on the water where the drops fall
-  if (world.weather === 'rain') for (let i = 0; i < 60; i++) {
+  if (world.weather === 'rain' || world.weather === 'storm') for (let i = 0; i < 60; i++) {
     const ph = t * 1.4 + hash(i, 2, 11), k = Math.floor(ph), p = ph - k, x = Math.round(x0 + hash(i, k, 12) * (x1 - x0)), y = Math.round(y0 + hash(i, k, 13) * (y1 - y0));
     if (!isWater(world, x, y)) continue;
     ctx.strokeStyle = `rgba(253,251,246,${0.6 * (1 - p) * wfade})`; ctx.lineWidth = 1;
@@ -242,14 +243,33 @@ function draw() {
 // the weather over it all, on the screen: rain falling, fog drifting, the wind blowing streaks and leaves along
 function weather(S) {
   const t = world.time, f = wfade, u = Math.max(2, Math.round(Math.min(cw, ch) / 170)), wk = world.weather;
-  if (wk === 'rain') {
-    ctx.fillStyle = `rgba(60,70,110,${0.2 * f})`; ctx.fillRect(0, 0, cw, ch);
+  if (wk === 'rain' || wk === 'storm') {
+    const storm = wk === 'storm', n = storm ? 260 : 150, slant = storm ? 0.45 : 0.2;
+    ctx.fillStyle = `rgba(${storm ? '40,45,80' : '60,70,110'},${(storm ? 0.38 : 0.2) * f})`; ctx.fillRect(0, 0, cw, ch);
     ctx.strokeStyle = `rgba(200,215,240,${0.55 * f})`; ctx.lineWidth = Math.max(1, u / 2); ctx.beginPath();
-    for (let i = 0; i < 150; i++) {
-      const h = hash(i, 0, 11), y = (hash(i, 1, 11) * ch + t * ch * (1.3 + h * 0.5)) % (ch + 40) - 20, x = (h * cw * 1.3 + y * 0.2) % cw;
-      ctx.moveTo(x, y); ctx.lineTo(x + u * 1.5, y + u * 7);
+    for (let i = 0; i < n; i++) {
+      const h = hash(i, 0, 11), y = (hash(i, 1, 11) * ch + t * ch * (1.3 + h * 0.5)) % (ch + 40) - 20, x = (h * cw * 1.3 + y * slant) % cw;
+      ctx.moveTo(x, y); ctx.lineTo(x + u * 7 * slant, y + u * 7);
     }
     ctx.stroke();
+    if (storm) { // (lightning: now and then a bolt and the sky lit white, flickering)
+      const slot = Math.floor(t / 4), d = t - slot * 4 - hash(slot, 0, 16) * 3;
+      if (d >= 0 && d < 0.35) {
+        const a = (1 - d / 0.35) * (d % 0.12 < 0.06 ? 1 : 0.5) * f;
+        ctx.fillStyle = `rgba(235,240,255,${0.55 * a})`; ctx.fillRect(0, 0, cw, ch);
+        let x = cw * (0.15 + hash(slot, 1, 16) * 0.7), y = 0;
+        ctx.strokeStyle = `rgba(255,255,240,${a})`; ctx.lineWidth = u * 1.5; ctx.beginPath(); ctx.moveTo(x, y);
+        for (let k = 0; y < ch * 0.6; k++) { x += (hash(slot, k + 2, 16) - 0.5) * u * 24; y += u * (6 + hash(slot, k + 40, 16) * 10); ctx.lineTo(x, y); }
+        ctx.stroke();
+      }
+    }
+  } else if (wk === 'snow') { // (snow: the land paler, flakes drifting down, swaying)
+    ctx.fillStyle = `rgba(240,244,252,${0.28 * f})`; ctx.fillRect(0, 0, cw, ch);
+    ctx.fillStyle = `rgba(253,251,246,${0.9 * f})`;
+    for (let i = 0; i < 160; i++) {
+      const h = hash(i, 0, 17), y = (hash(i, 1, 17) * ch + t * u * (14 + h * 14)) % (ch + 20) - 10, x = (h * cw * 1.3 + Math.sin(t * 1.3 + i) * u * 6) % cw, q = u * (h > 0.7 ? 2 : 1);
+      ctx.fillRect(Math.round(x), Math.round(y), q, q);
+    }
   } else if (wk === 'fog') {
     ctx.fillStyle = `rgba(225,230,238,${(0.3 + 0.25 * Math.min(1, bird.z / CRUISE)) * f})`; ctx.fillRect(0, 0, cw, ch);
     const r = Math.max(cw, ch) * 0.45;
@@ -258,7 +278,8 @@ function weather(S) {
       const g = ctx.createRadialGradient(x, y, 0, x, y, r); g.addColorStop(0, `rgba(240,243,248,${0.45 * f})`); g.addColorStop(1, 'rgba(240,243,248,0)');
       ctx.fillStyle = g; ctx.fillRect(x - r, y - r, r * 2, r * 2);
     }
-  } else if (wk === 'wind') {
+  }
+  if (wk === 'wind' || wk === 'storm') {
     const a = Math.atan2(world.wind.y, world.wind.x), ca = Math.cos(a), sa = Math.sin(a), W2 = cw + 200, H2 = ch + 200;
     ctx.strokeStyle = `rgba(253,251,246,${0.35 * f})`; ctx.lineWidth = Math.max(1, u / 2); ctx.beginPath();
     for (let i = 0; i < 40; i++) {

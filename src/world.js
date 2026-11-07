@@ -137,12 +137,15 @@ export const WEATHER = {
   rain: { worm: 0.5, frog: 0.35, beetle: 0.15 },
   fog: { mouse: 0.6, worm: 0.2, beetle: 0.2 },
   wind: { mouse: 0.35, beetle: 0.4, worm: 0.25 },
+  snow: { mouse: 0.75, beetle: 0.25 },
+  storm: { frog: 0.5, worm: 0.5 },
 };
 // a new day's weather: what lies about now (most of it) hides, other animals come out; the wind (px/s) blowing
 export function setWeather(w, kind) {
   w.weather = kind;
   const a = w.rand() * Math.PI * 2;
-  w.wind = kind === 'wind' ? { x: Math.cos(a) * 22, y: Math.sin(a) * 22 } : { x: 0, y: 0 };
+  const s = kind === 'wind' ? 22 : kind === 'storm' ? 30 : 0;
+  w.wind = { x: Math.cos(a) * s, y: Math.sin(a) * s };
   for (const f of w.food) if (f.gone <= 0 && !(WEATHER[kind][f.kind] > w.rand())) f.gone = 1 + w.rand() * 8;
 }
 function placeFood(w, f) {
