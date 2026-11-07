@@ -44,6 +44,8 @@ export function nextDay(e) {
 // is its chick hungry (so prey brought to the nest is fed to it)?
 export const hungry = (e) => e.brood.stage === 'chick' && !e.brood.chick.ready && e.brood.chick.fed < FEEDS;
 export function feed(e) { if (hungry(e)) e.brood.chick.fed++; }
+// how grown a chick is (0 .. 1), each meal a little more
+export const growth = (c) => (c.ready ? 1 : Math.min(1, (c.grown * FEEDS + Math.min(c.fed, FEEDS)) / (GROW_DAYS * FEEDS)));
 // the grown chick flies off: an eagle of its own (no home yet), in its parent's nest; the parent's nest empty again
 export function fledge(save, e) {
   const c = e.brood.chick;

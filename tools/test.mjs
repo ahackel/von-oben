@@ -132,7 +132,9 @@ for (const kind of ['barn', 'cave']) {
   const save = fam.newGame('ADA', w.nest), e = fam.current(save);
   for (let d = 0; d < 4; d++) assert.equal(fam.nextDay(e), null);
   assert.equal(fam.nextDay(e), 'egg'); assert.equal(fam.nextDay(e), 'hatch');
-  assert.ok(fam.hungry(e)); fam.feed(e); fam.nextDay(e); assert.equal(e.brood.chick.grown, 0, 'fed too little: not grown');
+  const g0 = fam.growth(e.brood.chick);
+  assert.ok(fam.hungry(e)); fam.feed(e);
+  assert.ok(fam.growth(e.brood.chick) > g0, 'fed: a little bigger'); fam.nextDay(e); assert.equal(e.brood.chick.grown, 0, 'fed too little: not grown');
   let ev = null; for (let d = 0; d < 3; d++) { fam.feed(e); fam.feed(e); assert.ok(!fam.hungry(e)); ev = fam.nextDay(e); }
   assert.equal(ev, 'grown');
   e.brood.chick.name = 'BEN';

@@ -9,9 +9,9 @@ const LIGHT = (() => { const l = [-0.45, -0.55, 1]; const n = Math.hypot(...l); 
 // a pose's lumps, in the eagle's own frame: x forwards, y to its right, z up; each [center, radii, color, roll (a wing's,
 // round its shoulder)]
 // each eagle a little different, by its number (0: the first, as it always was): its brown, its head's white, its size,
-// its head's and beak's; a chick (grown: days fed) small and grey, a big head
+// its head's and beak's; a chick (grown: 0 just hatched .. 1 grown) small and grey, a big head, bigger with each meal
 export function lookOf(n, chick = null) {
-  if (chick) return { key: `c${chick}`, body: HEX.lightGrey, wing: HEX.blueGrey, head: HEX.white, size: 0.75 + chick * 0.1, headR: 1.3, beak: 0.7 };
+  if (chick !== null) { const p = Math.round(Math.min(1, chick) * 6) / 6; return { key: `c${p}`, body: HEX.lightGrey, wing: HEX.blueGrey, head: HEX.white, size: 0.4 + p * 0.75, headR: 1.35 - p * 0.25, beak: 0.6 + p * 0.2 }; }
   if (!n) return { key: '0', body: HEX.darkBrown, wing: HEX.deepBrown, head: HEX.white, size: SIZE, headR: 1, beak: 1 };
   const h = (k) => hash(n, k, 61), other = [HEX.brown, HEX.deepBrown, HEX.rust, HEX.charcoal][Math.floor(h(1) * 4)];
   return { key: `${n}`, body: mix(HEX.darkBrown, other, 0.15 + h(2) * 0.45), wing: mix(HEX.deepBrown, other, h(3) * 0.45), head: mix(HEX.white, [HEX.cream, HEX.lightGrey, HEX.beige][Math.floor(h(4) * 3)], h(5) * 0.7),

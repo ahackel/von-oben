@@ -42,7 +42,7 @@ function sky() {
   return [mix(c0, c1, e), d0 + (d1 - d0) * e];
 }
 globalThis.vonOben = { get bird() { return bird; }, get world() { return world; }, get me() { return me; }, save, setDay: (d) => (day = d), newDay, play }; // (to look into, from the console)
-const ZOOM_GROUND = 4, ZOOM_AIR = 1.5, VERSION = 'V14'; // (on the title: is the new code there?)
+const ZOOM_GROUND = 4, ZOOM_AIR = 1.5, VERSION = 'V15'; // (on the title: is the new code there?)
 
 function resize() {
   dpr = window.devicePixelRatio || 1; cw = cv.width = Math.round(innerWidth * dpr); ch = cv.height = Math.round(innerHeight * dpr);
@@ -161,7 +161,7 @@ function openMenu() {
       lines: [`INSEL ${islandName(e.gx, e.gy)}, TAG ${e.dayN}`, fam.broodSay(e), `${e.bird.caught} BEUTE${e.gems ? `, ${e.gems} SCHÄTZE` : ''}`] });
     const c = e.brood.chick;
     if (e.brood.stage === 'egg') rows.push({ sub: true, picture: picture((g) => ART.egg.draw(g, 3, 2), 10, 9, 6), name: 'EIN EI', lines: ['SCHLÜPFT MORGEN'] });
-    if (c) rows.push({ sub: true, picture: portrait(c.ready ? lookOf(c.look) : lookOf(0, c.grown)), name: c.name || 'KÜKEN', lines: [c.ready ? 'IST GROSS UND KANN AUSFLIEGEN' : `WÄCHST: TAG ${c.grown + 1} VON ${fam.GROW_DAYS}`],
+    if (c) rows.push({ sub: true, picture: portrait(c.ready ? lookOf(c.look) : lookOf(0, fam.growth(c))), name: c.name || 'KÜKEN', lines: [c.ready ? 'IST GROSS UND KANN AUSFLIEGEN' : `WÄCHST: TAG ${c.grown + 1} VON ${fam.GROW_DAYS}`],
       action: c.ready ? ['AUSFLIEGEN', () => play(fam.fledge(save, e))] : null });
   }
   ui.menu(rows);
@@ -312,7 +312,7 @@ function draw() {
       ART.nest.draw(ctx, o.x - ART.nest.w / 2, o.y - PERCH - ART.nest.h / 2);
       const r = fam.residentOf(save, me.gx, me.gy), b = r?.brood; // (its egg, its chick)
       if (b?.stage === 'egg') ART.egg.draw(ctx, o.x + 4, o.y - PERCH - 4);
-      if (b?.stage === 'chick') drawChick(ctx, o.x + 7 - 20, o.y - PERCH + 1 - 24, b.chick.grown, sky()[1] > 0.6 ? 'sleep' : 'stand', b.chick.ready ? lookOf(b.chick.look) : undefined);
+      if (b?.stage === 'chick') drawChick(ctx, o.x + 7 - 20, o.y - PERCH + 1 - 24, fam.growth(b.chick), sky()[1] > 0.6 ? 'sleep' : 'stand', b.chick.ready ? lookOf(b.chick.look) : undefined);
     }
   }
   // clouds: their shadows on the ground (in sunshine), the clouds up at CLOUD; high, the eagle over them, else under
