@@ -1,0 +1,12 @@
+{
+  "name": "von-oben",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Ein Weißkopfseeadler über einer Insel",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "node tools/serve.mjs",
+    "test": "node tools/test.mjs"
+  }
+}
