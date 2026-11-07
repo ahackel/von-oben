@@ -134,7 +134,7 @@ function cragRows(w = 44, top = 14) {
 ROCKS.crag = { keys: STONE, rows: cragRows() };
 
 const SMALL = {
-  mouse: { keys: { G: 'grey.light', g: 'grey', s: 'grey.shade', p: 'pink' }, rows: ['.p...p.', 'GGGGG..', 'gegggg.', '.sssss.p', '.......p'] },
+  mouse: { keys: { G: 'grey.light', g: 'grey', s: 'grey.shade', p: 'pink' }, rows: ['.GG......', 'GGGGGG...', 'peGGGGGg.', '.gggggggp', '..s...s..'] }, // (facing left: an ear up, the legs down, its tail out behind)
   beetle: { keys: { G: 'darkGreen.light', g: 'darkGreen', b: 'black' }, rows: ['b.b', 'GGg', 'ggg', 'b.b'] },
   worm: { keys: { P: 'lightPink', p: 'pink', r: 'rose' }, rows: ['.PP..', 'p..pp', '.....'] },
   fish: { keys: { S: 'blueGrey.light', s: 'blueGrey', d: 'blueGrey.shade' }, rows: ['.SSS..S', 'SeSssSs', '.ddd..d'] },

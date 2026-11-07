@@ -141,11 +141,17 @@ function placeFood(w, f) {
 export const perchNear = (w, x, y, r) => near(w, x, y, (o) => o.perch && Math.hypot(o.x - x, o.y - y) < r);
 // snatching what is within r of (x, y): a mouse, beetle, worm or a fish (gone for a while, elsewhere); what it was
 export function snatch(w, x, y, r) {
-  const f = w.food.find((f) => f.gone <= 0 && Math.hypot(f.x - x, f.y - y) < r);
-  if (f) { f.gone = 15 + w.rand() * 20; return f.kind; }
-  const g = w.fish.find((f) => f.t <= 0 && Math.hypot(f.x - x, f.y - y) < r);
-  if (g) { g.t = 20; return 'fish'; }
-  return null;
+  const f = w.food.find((f) => alive(f) && Math.hypot(f.x - x, f.y - y) < r) || w.fish.find((f) => alive(f) && Math.hypot(f.x - x, f.y - y) < r);
+  return f ? take(w, f) : null;
+}
+export const alive = (f) => (f.kind ? f.gone <= 0 : f.t <= 0); // (a mouse, beetle, worm (kind) or a fish: there to catch?)
+export function take(w, f) { if (f.kind) { f.gone = 15 + w.rand() * 20; return f.kind; } f.t = 20; return 'fish'; }
+// the nearest prey to (x, y) within r (the land's or the sea's)
+export function nearestPrey(w, x, y, r) {
+  let best = null, d = r;
+  for (const f of w.food) if (alive(f) && Math.hypot(f.x - x, f.y - y) < d) { best = f; d = Math.hypot(f.x - x, f.y - y); }
+  for (const f of w.fish) if (alive(f) && Math.hypot(f.x - x, f.y - y) < d) { best = f; d = Math.hypot(f.x - x, f.y - y); }
+  return best;
 }
 
 // time going by: the eagle (b) near and low, what lies about startles and runs off; caught, it comes back elsewhere;

@@ -10,7 +10,7 @@ import { ART, HOUSE_LIGHTS } from './art/island.js';
 const cv = document.getElementById('game'), ctx = cv.getContext('2d');
 const world = makeWorld(), bird = makeBird(world.nest.x, world.nest.y, PERCH); // (it starts at home, in its nest)
 let cw = 0, ch = 0, dpr = 1, zoom = 4, started = false, last = performance.now(), keyPush = 0;
-const particles = [], keys = new Set();
+const particles = [], wake = [], keys = new Set(); // (wake: where it swam, the water's V spreading behind it)
 // a day: DAY seconds (asleep: 12 times as fast). Through it, what the world is tinted with (multiplied: as Lop Hop's
 // sunset and morning tint its palette) and how dark it is: day, a sunset, a purple dusk, the night, a pink morning
 const DAY = 240, SKY = [[0, '#ffffff', 0], [0.42, '#ffffff', 0], [0.5, mix('#ffffff', '#ff8c5a', 0.55), 0.15], [0.56, '#a088c4', 0.6],
@@ -21,7 +21,7 @@ function sky() {
   return [mix(c0, c1, e), d0 + (d1 - d0) * e];
 }
 globalThis.vonOben = { bird, world, setDay: (d) => (day = d) }; // (to look into, from the console)
-const ZOOM_GROUND = 4, ZOOM_AIR = 1.5, VERSION = 'V6'; // (on the title: is the new code there?)
+const ZOOM_GROUND = 4, ZOOM_AIR = 1.5, VERSION = 'V7'; // (on the title: is the new code there?)
 
 function resize() {
   dpr = window.devicePixelRatio || 1; cw = cv.width = Math.round(innerWidth * dpr); ch = cv.height = Math.round(innerHeight * dpr);
@@ -103,7 +103,12 @@ function frame(now) {
   update(world, dt, started ? bird : null);
   if (started) step(bird, input(dt), dt, world);
   day = (day + (dt * (bird.asleep ? 12 : 1)) / DAY) % 1;
-  for (const e of bird.events.splice(0)) particles.push({ ...e, t: 0 });
+  for (const e of bird.events.splice(0)) {
+    particles.push({ ...e, t: 0 });
+    if (e.type === 'splash') for (let i = 0; i < 14; i++) { const a = Math.random() * Math.PI * 2, s = 10 + Math.random() * 25; particles.push({ type: 'drop', x: e.x, y: e.y, vx: Math.cos(a) * s, vy: Math.sin(a) * s * 0.6, vz: 30 + Math.random() * 45, t: 0 }); }
+  }
+  if (bird.state === 'swim' && bird.v > 2 && (wake.at || 0) <= world.time) { wake.push({ x: bird.x, y: bird.y, a: bird.a, t: 0 }); wake.at = world.time + 0.12; }
+  for (let i = wake.length - 1; i >= 0; i--) if ((wake[i].t += dt) > 2) wake.splice(i, 1);
   for (let i = particles.length - 1; i >= 0; i--) if ((particles[i].t += dt) > 1.2) particles.splice(i, 1);
   const up = bird.state === 'ground' ? 0 : bird.z; // (in its nest: as on the ground)
   zoom += ((ZOOM_GROUND + (ZOOM_AIR - ZOOM_GROUND) * Math.min(1, up / CRUISE)) - zoom) * Math.min(1, dt * 3);
@@ -135,6 +140,12 @@ function draw() {
       if (c) for (let n = 0; n < c.length; n += 3) if (Math.abs(c[n + 2] - level) < 0.0016) ctx.fillRect(c[n], c[n + 1], 2, 2);
     }
   }
+  // the wake: two lines spreading out from where it swam, fading
+  for (const k of wake) {
+    const nx = -Math.sin(k.a), ny = Math.cos(k.a), d = 2 + k.t * 7;
+    ctx.fillStyle = `rgba(253,251,246,${0.6 * (1 - k.t / 2)})`;
+    ctx.fillRect(Math.round(k.x + nx * d), Math.round(k.y + ny * d * 0.6), 2, 1); ctx.fillRect(Math.round(k.x - nx * d), Math.round(k.y - ny * d * 0.6), 2, 1);
+  }
   // fish: shadows under the water
   ctx.fillStyle = 'rgba(35,45,90,0.4)';
   for (const f of world.fish) if (f.t <= 0 && f.x > x0 && f.x < x1 && f.y > y0 && f.y < y1) {
@@ -165,6 +176,10 @@ function draw() {
     s.draw(ctx, o.x - s.w / 2, o.y - s.h + 1);
     if (o.nest) ART.nest.draw(ctx, o.x - ART.nest.w / 2, o.y - PERCH - ART.nest.h / 2);
   }
+  for (const p of particles) if (p.type === 'drop') { // (thrown up, falling back)
+    const z = p.vz * p.t - 90 * p.t * p.t;
+    if (z > 0) { ctx.fillStyle = 'rgba(253,251,246,0.9)'; ctx.fillRect(Math.round(p.x + p.vx * p.t), Math.round(p.y + p.vy * p.t - z), 1, 2); }
+  }
   for (const p of particles) if (p.type === 'splash' || p.type === 'miss') {
     ctx.strokeStyle = `rgba(253,251,246,${1 - p.t / 1.2})`; ctx.lineWidth = 1;
     ctx.beginPath(); ctx.ellipse(p.x, p.y, 4 + p.t * 14, 1.5 + p.t * 5, 0, 0, Math.PI * 2); ctx.stroke();
@@ -191,6 +206,13 @@ function draw() {
       ctx.fillStyle = f.kind ? `rgba(255,226,90,${a})` : `rgba(253,251,246,${a})`; ctx.fillRect(px, py, q, q);
     }
   }
+  // fixed on its prey: brackets round it, closing in
+  const g = bird.target;
+  if (g && (g.kind ? g.gone <= 0 : g.t <= 0)) {
+    const r = 7 + Math.sin(t * 8) * 1.5, x = Math.round(g.x), y = Math.round(g.y) - 2;
+    ctx.fillStyle = HEX.yellow;
+    for (const [sx, sy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) { ctx.fillRect(x + sx * r - (sx > 0 ? 3 : 0), y + sy * r - (sy > 0 ? 1 : 0), 4, 1); ctx.fillRect(x + sx * r - (sx > 0 ? 1 : 0), y + sy * r - (sy > 0 ? 3 : 0), 1, 4); }
+  }
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   if (bird.state === 'dive') { ctx.fillStyle = 'rgba(40,70,130,0.3)'; ctx.fillRect(0, 0, cw, ch); }
   hud(S, camx, camy);
@@ -199,6 +221,10 @@ function draw() {
 function drawBird() {
   const pic = eagle(poseOf(bird), bird.a), x = Math.round(bird.x), y = Math.round(bird.y - bird.z);
   if (bird.state === 'swim') { ctx.strokeStyle = 'rgba(253,251,246,0.7)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.ellipse(x, y, 9 + Math.sin(world.time * 3), 3.5, 0, 0, Math.PI * 2); ctx.stroke(); }
+  if (bird.stooping) { // (the wind: streaks behind it, up the screen)
+    ctx.fillStyle = 'rgba(253,251,246,0.55)';
+    for (let i = 0; i < 4; i++) { const h = hash(i, Math.floor(world.time * 12), 5); ctx.fillRect(x - 8 + Math.floor(h * 16), y - 26 - Math.floor(h * 10), 1, 6 + Math.floor(h * 6)); }
+  }
   ctx.drawImage(pic.canvas, x - pic.ox, y - pic.oy);
   if (bird.prey && bird.state !== 'dive' && !(bird.state === 'swim' && bird.prey === 'fish')) { // (in its claws; eating: at its beak)
     const s = ART[bird.prey], [bx, by] = bird.eating > 0 ? beak(bird.a) : [0, bird.state === 'air' ? 3 : 0];

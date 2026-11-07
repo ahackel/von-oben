@@ -78,6 +78,19 @@ assert.ok(k.state === 'ground' && k.z === PERCH && !k.asleep, 'resting on a rock
 let isles = 0;
 for (let y = 8; y < H; y += 16) for (let x = 8; x < W; x += 16) if (!isWater(w, x, y) && [0, 1, 2, 3].every((q) => terrain(w, x + Math.cos(q * 1.57) * 160, y + Math.sin(q * 1.57) * 160) === DEEP)) isles++;
 assert.ok(isles > 0, 'small islands');
+// on foot: grabbed when near
+const pg = w.food.find((f) => f.gone <= 0), gb = makeBird(pg.x - 4, pg.y); gb.a = 0; run(gb, { push: 0.1 }, 0.3);
+assert.ok(gb.prey, 'grabbed on foot');
+// flying near prey a while: fixed on it; stooping, it gets it, though it starts off to one side
+const pt = w.food.find((f) => f.gone <= 0 && f.kind === 'beetle'), fb = makeBird(pt.x + 40, pt.y + 20, 60); fb.state = 'air'; fb.v = 0;
+for (let n = 0; n < 90 && !fb.target; n++) { fb.x = pt.x + 40; fb.y = pt.y + 20; fb.z = 60; step(fb, { push: 0.75 }, 1 / 60, w); }
+assert.equal(fb.target, pt, 'fixed on the beetle');
+for (let n = 0; n < 120 && !fb.prey; n++) { update(w, 1 / 60, fb); step(fb, { push: -1 }, 1 / 60, w); }
+assert.equal(fb.prey, 'beetle', 'stooped on it, caught it');
+// gliding down by the nest, a little off: drawn in, sitting in it
+const nb = makeBird(w.nest.x + 25, w.nest.y + 10, PERCH + 25); nb.state = 'air'; nb.v = 30; nb.a = Math.PI;
+run(nb, { push: 0 }, 2.5);
+assert.ok(nb.state === 'ground' && nb.z === PERCH && nb.perch?.nest, 'drawn into the nest');
 // out to sea, beyond the island's map
 const o = makeBird(W - 20, H / 2, CRUISE); o.state = 'air'; o.v = 90; o.a = 0; run(o, { push: 1 }, 10);
 assert.ok(o.x > W + 300 && o.state === 'air', 'far out over the sea');

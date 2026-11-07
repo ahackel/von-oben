@@ -18,6 +18,14 @@ function lumps(pose) {
   add(body(-6.2, -0.4), [2.8, 2.1, 0.8], 'white'); // tail
   for (const s of [1, -1]) {
     if (!pose.sleep) L.push({ c: [6.4, s * 1.5, 9.4 + z0 - bob], r: [0.5, 0.5, 0.5], col: 'black' }); // eye (shut, asleep)
+    if (pose.stoop) { // (stooping: the wings drawn in tight along its back, swept up; the legs out, talons first)
+      add([-2, s * 2.4, 7.6], [5.6, 1.2, 1.5], 'deepBrown');
+      add([-6.2, s * 1.6, 7.9], [2.6, 0.8, 0.8], 'deepBrown');
+      add([2.4, s * 1.4, 2.8], [1.4, 0.8, 1], 'darkBrown');
+      add([4.4, s * 1.3, 1.9], [1.5, 0.6, 0.6], 'yellow');
+      L.push({ c: [5.7, s * 1.3, 1.5], r: [0.5, 0.5, 0.5], col: 'black' });
+      continue;
+    }
     if (pose.wings === undefined) add([-0.6, s * 2.6, 6.6 + z0 - bob], [4.8, 1, 2.2], 'deepBrown'); // folded
     else add([-0.4, s * 7.2, 6.8], [3.2, 6.6, 0.7], 'deepBrown', pose.wings, s); // spread
     if (pose.legs) {
@@ -30,7 +38,7 @@ function lumps(pose) {
 
 // a picture of the pose, facing a (radians): { canvas, ox, oy (where its feet are, in it) }
 function render(pose, a) {
-  const ca = Math.cos(a), sa = Math.sin(a), pitch = pose.dive ? 1.1 : 0, cp = Math.cos(pitch), sp = Math.sin(pitch);
+  const ca = Math.cos(a), sa = Math.sin(a), pitch = pose.dive ? 1.1 : pose.stoop ? 0.45 : 0, cp = Math.cos(pitch), sp = Math.sin(pitch);
   const px = new Map(); // ("x,y" → [depth, color, base])
   for (const { c: c0, r: r0, col, roll = 0, side = 1 } of lumps(pose)) {
     const c = c0.map((v) => v * SIZE), r = r0.map((v) => v * SIZE);
@@ -74,7 +82,7 @@ function render(pose, a) {
 
 export const DIRS = 16;
 const POSES = {
-  stand: { legs: 'stand' }, sleep: { sleep: true }, walk0: { legs: 'walk0' }, walk1: { legs: 'walk1' }, swim: { swim: true }, dive: { dive: true },
+  stand: { legs: 'stand' }, sleep: { sleep: true }, walk0: { legs: 'walk0' }, walk1: { legs: 'walk1' }, swim: { swim: true }, dive: { dive: true }, stoop: { stoop: true },
   glide: { wings: 0.08 }, fly0: { wings: 0.6 }, fly1: { wings: 0.2 }, fly2: { wings: -0.35 }, fly3: { wings: 0.05 },
 };
 const made = new Map();
@@ -89,6 +97,7 @@ export function poseOf(b) {
   if (b.asleep) return 'sleep';
   if (b.state === 'swim') return 'swim';
   if (b.state === 'dive') return 'dive';
+  if (b.state === 'air' && b.stooping) return 'stoop';
   if (b.state === 'air') return b.flapping && (b.climbing || b.flap % 2 < 1.4) ? `fly${Math.floor(b.flap * 8) % 4}` : 'glide';
   return b.v < 2 ? 'stand' : `walk${Math.floor(b.stride / 5) % 2}`;
 }
