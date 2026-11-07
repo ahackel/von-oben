@@ -42,7 +42,7 @@ function sky() {
   return [mix(c0, c1, e), d0 + (d1 - d0) * e];
 }
 globalThis.vonOben = { get bird() { return bird; }, get world() { return world; }, get me() { return me; }, save, setDay: (d) => (day = d), newDay, play }; // (to look into, from the console)
-const ZOOM_GROUND = 4, ZOOM_AIR = 1.5, VERSION = 'V13'; // (on the title: is the new code there?)
+const ZOOM_GROUND = 4, ZOOM_AIR = 1.5, VERSION = 'V14'; // (on the title: is the new code there?)
 
 function resize() {
   dpr = window.devicePixelRatio || 1; cw = cv.width = Math.round(innerWidth * dpr); ch = cv.height = Math.round(innerHeight * dpr);
@@ -365,6 +365,19 @@ function draw() {
     ctx.fillStyle = HEX.yellow;
     for (const [sx, sy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) { ctx.fillRect(x + sx * r - (sx > 0 ? 3 : 0), y + sy * r - (sy > 0 ? 1 : 0), 4, 1); ctx.fillRect(x + sx * r - (sx > 0 ? 1 : 0), y + sy * r - (sy > 0 ? 3 : 0), 1, 4); }
   }
+  // rays of sunlight (in the sun), slanting down from the top left: fixed on the world, each its own stretch of it
+  const ray = !world.room && world.weather === 'sun' ? 0.16 * wfade * (1 - dark) : 0, K = 0.6, RC = 230, RL = 420;
+  if (ray > 0.005) {
+    ctx.globalCompositeOperation = 'lighter';
+    for (let i = Math.floor((x0 - y1 * K) / RC) - 1; i <= (x1 - y0 * K) / RC; i++) for (let j = Math.floor(y0 / RL) - 1; j <= y1 / RL; j++) {
+      if (hash(i, j, 18) > 0.45) continue;
+      const u = i * RC + hash(i, j, 19) * RC * 0.6, bw = 14 + hash(i, j, 20) * 36, top = j * RL + hash(i, j, 21) * RL * 0.4, bot = top + RL * (0.6 + hash(i, j, 22) * 0.6);
+      const a = ray * (0.7 + 0.3 * Math.sin(t * 0.5 + i * 2 + j));
+      const g = ctx.createLinearGradient(0, top, 0, bot); g.addColorStop(0, 'rgba(255,236,190,0)'); g.addColorStop(0.3, `rgba(255,236,190,${a})`); g.addColorStop(1, 'rgba(255,236,190,0)');
+      ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(u + top * K, top); ctx.lineTo(u + bw + top * K, top); ctx.lineTo(u + bw + bot * K, bot); ctx.lineTo(u + bot * K, bot); ctx.closePath(); ctx.fill();
+    }
+    ctx.globalCompositeOperation = 'source-over';
+  }
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   if (!world.room) weather(S);
   if (world.room === 'cave') { // (the dark: only round the eagle a little light)
@@ -428,17 +441,6 @@ function weather(S) {
       ctx.fillRect(Math.round(x), Math.round(y), u * (1 + (Math.sin(t * 9 + i) > 0)), u);
       ctx.globalAlpha = 1;
     }
-  }
-  // rays of sunlight, slanting down from the top left through the fog (in the sun: faint)
-  const [, dark] = sky(), ray = (wk === 'fog' ? 0.14 : wk === 'sun' ? 0.06 : 0) * f * (1 - dark);
-  if (ray > 0.005) {
-    ctx.globalCompositeOperation = 'lighter';
-    for (let i = 0; i < 5; i++) {
-      const x = cw * (hash(i, 0, 18) * 1.2 - 0.4) + Math.sin(t * 0.15 + i) * cw * 0.04, bw = cw * (0.03 + hash(i, 1, 18) * 0.07), run = ch * 0.7;
-      const g = ctx.createLinearGradient(0, 0, 0, ch); g.addColorStop(0, `rgba(255,236,190,${ray * (0.7 + 0.3 * Math.sin(t * 0.5 + i * 2))})`); g.addColorStop(1, 'rgba(255,236,190,0)');
-      ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x + bw, 0); ctx.lineTo(x + bw * 2 + run, ch); ctx.lineTo(x + run, ch); ctx.closePath(); ctx.fill();
-    }
-    ctx.globalCompositeOperation = 'source-over';
   }
 }
 

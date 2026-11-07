@@ -92,7 +92,7 @@ export function step(b, { turn = 0, push = 0 }, dt, w) {
   if (!stop(b.x, b.y + dy)) b.y += dy;
   if (!w.room) { b.x = Math.max(-SEA - 40, Math.min(W + SEA + 40, b.x)); b.y = Math.max(-SEA - 40, Math.min(H + SEA + 40, b.y)); } // (beyond the sea's edge: the next island, see main)
   b.stride += b.v * dt;
-  if (b.state === 'ground' && b.z > 0 && Math.hypot(b.x - b.perch.x, b.y - b.perch.y) > NEST) b.state = 'air'; // (off the rock's edge: gliding)
+  if (b.state === 'ground' && b.z > 0 && (!b.perch || Math.hypot(b.x - b.perch.x, b.y - b.perch.y) > NEST)) b.state = 'air'; // (off the rock's edge: gliding)
   else if (b.state === 'ground' && !b.z && isWater(w, b.x, b.y)) { b.state = 'swim'; b.v = Math.min(b.v, SWIM); b.events.push({ type: 'splash', x: b.x, y: b.y }); }
   else if (b.state === 'swim' && !isWater(w, b.x, b.y)) b.state = 'ground';
 }
