@@ -154,7 +154,28 @@ function caveRows() {
   for (let y = 0; y < h; y++) { let r = ''; for (let x = 0; x < w; x++) { const dx = (x - (w - 1) / 2) / (w / 2), dy = (y - h) / h, d = Math.hypot(dx, dy); r += d > 1 ? '.' : d > 0.78 ? (dy < -0.6 ? 'N' : 'g') : d > 0.6 ? 'E' : 'b'; } rows.push(r); }
   return rows;
 }
+// a wreck: a hull on its side, planks sprung, a broken mast
+function wreckRows() {
+  const w = 46, h = 20, rows = [];
+  for (let y = 0; y < h; y++) { let r = ''; for (let x = 0; x < w; x++) {
+    const dx = (x - 23) / 23, dy = (y - 8) / 11, hull = Math.hypot(dx, dy) < 1 && y > 7, mast = Math.abs(x - 20 - (8 - y) * 0.6) < 1.3 && y <= 8;
+    r += mast ? 'M' : !hull ? '.' : (x * 3 + y) % 11 === 0 ? 'k' : y < 10 ? 'L' : y % 3 === 0 ? 'd' : 'B';
+  } rows.push(r); }
+  return rows;
+}
+// a lighthouse: red and white rings, its gallery on top (where the eagle sits), a lamp by it
+function towerRows() {
+  const h = PERCH + 7, rows = [];
+  for (let y = 0; y < h; y++) { let r = ''; for (let x = 0; x < 24; x++) {
+    const dx = Math.abs(x - 11.5);
+    if (y < 11) r += Math.hypot(dx / 12, (y - 6) / 5) > 1 ? '.' : Math.hypot(dx / 12, (y - 6) / 5) > 0.8 ? 'g' : 'P';
+    else { const half = 6 + (y - 11) * 0.06; r += dx > half ? '.' : y > h - 9 && dx < 2 ? 'D' : Math.floor((y - 11) / 7) % 2 ? (dx > half - 1.5 ? 'w' : 'W') : dx > half - 1.5 ? 'r' : 'R'; }
+  } rows.push(r); }
+  return rows;
+}
 const ROOMS = {
+  wreck: { keys: { L: 'brown.light', B: 'brown', d: 'deepBrown', M: 'darkBrown' }, rows: wreckRows() },
+  tower: { keys: { P: 'lightGrey', g: 'charcoal', R: 'red', r: 'red.shade', W: 'white', w: 'lightGrey', D: 'deepBrown' }, rows: towerRows() },
   barn: { keys: { L: 'red.light', R: 'red', r: 'red.shade', W: 'red', w: 'red.shade', T: 'white', D: 'deepBrown.dark' }, rows: barnRows() },
   cave: { keys: { ...STONE, b: 'black' }, rows: caveRows() },
   hay: { keys: { Y: 'yellow.light', y: 'ochre', o: 'ochre.shade' }, rows: ['.YYYYYYYYYYYYYYYYYYYYYYYYYY.', ...Array.from({ length: 11 }, (_, j) => [...'yYYYYYYYYYYYYYYYYYYYYYYYYYYy'].map((c, i) => (i % 9 === 4 || j === 10 ? 'o' : j < 3 ? 'Y' : (i * 7 + j * 3) % 11 === 0 ? 'y' : c === 'Y' ? (j > 7 ? 'y' : 'Y') : c)).join(''))] },

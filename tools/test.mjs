@@ -1,7 +1,7 @@
 // npm test: the island and the eagle without a screen: there is land and sea, a village; the eagle takes off, flies,
 // gets tired, glides down and lands when let go; it can't walk through a house; it eats; it swims, dives and (with luck) catches a fish.
 import assert from 'node:assert/strict';
-import { makeWorld, makeRoom, update, setWeather, terrain, isWater, blocked, doorAt, islandSeed, W, H, GRASS, ROCK, DEEP, WALL, PERCH } from '../src/world.js';
+import { makeWorld, makeRoom, update, setWeather, terrain, isWater, blocked, doorAt, seedOf, W, H, GRASS, ROCK, DEEP, WALL, PERCH } from '../src/world.js';
 import * as fam from '../src/family.js';
 import { makeBird, step, CRUISE } from '../src/bird.js';
 
@@ -110,7 +110,7 @@ const o = makeBird(W - 20, H / 2, CRUISE); o.state = 'air'; o.v = 90; o.a = 0; r
 assert.ok(o.x > W + 300 && o.state === 'air', 'far out over the sea');
 // other islands: each its own, the same each time
 {
-  const a = makeWorld(islandSeed(1, 0)), b = makeWorld(islandSeed(1, 0));
+  const a = makeWorld(seedOf(1)), b = makeWorld(seedOf(1));
   assert.notDeepEqual(a.ground.slice(0, 5000).join() + a.nest.x, w.ground.slice(0, 5000).join() + w.nest.x, 'another island');
   assert.deepEqual([a.nest, a.objects.length], [b.nest, b.objects.length], 'the same for everyone');
 }
@@ -133,18 +133,25 @@ for (const kind of ['barn', 'cave']) {
   for (let d = 0; d < 4; d++) assert.equal(fam.nextDay(e), null);
   assert.equal(fam.nextDay(e), 'egg'); assert.equal(fam.nextDay(e), 'hatch');
   const g0 = fam.growth(e.brood.chick);
-  assert.ok(fam.hungry(e)); fam.feed(e);
-  assert.ok(fam.growth(e.brood.chick) > g0, 'fed: a little bigger'); fam.nextDay(e); assert.equal(e.brood.chick.grown, 0, 'fed too little: not grown');
-  let ev = null; for (let d = 0; d < 3; d++) { fam.feed(e); fam.feed(e); assert.ok(!fam.hungry(e)); ev = fam.nextDay(e); }
+  fam.nextDay(e); assert.equal(e.brood.chick.grown, 0, 'not fed: not grown');
+  assert.ok(fam.hungry(e)); fam.feed(e); assert.ok(!fam.hungry(e), 'once a day is enough');
+  assert.ok(fam.growth(e.brood.chick) > g0, 'fed: a little bigger');
+  fam.nextDay(e); assert.equal(e.brood.chick.grown, 1, 'fed once: grown a day');
+  let ev = null; for (let d = 0; d < 2; d++) { fam.feed(e); ev = fam.nextDay(e); }
   assert.equal(ev, 'grown');
   e.brood.chick.name = 'BEN';
   const k = fam.fledge(save, e);
   assert.ok(k.name === 'BEN' && !k.home && e.brood.stage === 'none' && save.eagles.length === 2, 'flown off');
   assert.ok(!fam.claim(save, k, w.nest), 'its parent\'s nest is taken');
-  k.gx = 1; assert.ok(fam.claim(save, k, { x: 5, y: 5 }) && fam.residentOf(save, 1, 0) === k, 'a free nest: its home');
+  const there = fam.onward(save, k);
+  assert.ok(!save.eagles.some((x) => x.isl === there) && there !== fam.onward(save, k), 'over the sea: an island no eagle has seen, a new one each time');
+  k.isl = there; assert.ok(fam.claim(save, k, { x: 5, y: 5 }) && fam.residentOf(save, there) === k, 'a free nest: its home');
+  assert.equal(fam.onward(save, k), save.islands[(save.islands.indexOf(there) + 1) % save.islands.length], 'at home: on to the islands it knows');
   // in the nest with prey, the chick hungry: fed to it, not eaten
   const fb = makeBird(w.nest.x, w.nest.y, PERCH); fb.prey = 'mouse'; fb.feeds = true; fb.energy = 50;
   run(fb, { push: 0 }, 1);
   assert.ok(!fb.prey && fb.energy >= 50 && fb.events.some((v) => v.type === 'feed'), 'fed to the chick');
 }
+// each new island its surprise
+assert.deepEqual([1, 2, 3, 4, 5].map((k) => makeWorld(seedOf(k)).feature), ['caves', 'wreck', 'farm', 'tower', 'isles']);
 console.log('ok');

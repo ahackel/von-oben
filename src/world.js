@@ -17,19 +17,24 @@ const fbm = (x, y, s) => noise(x, y, s) * 0.55 + noise(x * 2.1, y * 2.1, s + 1) 
 // height above the sea (below 0: sea): noise, falling off towards the map's edges
 export const MOUNT = 0.3; // (from this height: the mountains, bare rock, snow on top)
 // each island its own shape, by its seed: how fast the land falls away to the edges, how much of it is above the sea
-const shapeOf = (s) => (s === 7 ? { fall: 0.62, lift: 0.1, sq: 1.05 } : { fall: 0.5 + hash(s, 1, 3) * 0.3, lift: 0.05 + hash(s, 2, 3) * 0.11, sq: 0.8 + hash(s, 3, 3) * 0.5 });
+const shapeOf = (s) => (s === 7 ? { fall: 0.62, lift: 0.1, sq: 1.05 } : { fall: 0.5 + hash(s, 1, 3) * 0.3, lift: (0.05 + hash(s, 2, 3) * 0.11) * (featureOf(s) === 'caves' ? 0.3 : 1), sq: 0.8 + hash(s, 3, 3) * 0.5 }); // (a cave island: high, mountains to dig into)
 const elevationAt = (x, y, s, p) => { const nx = (x / W) * 2 - 1, ny = (y / H) * 2 - 1; return fbm(x / 350, y / 350, s) - p.lift - Math.hypot(nx, ny * p.sq) * p.fall; };
-// the islands lie in a grid in the sea, each one the same for everyone: (0, 0) the first
-export const islandSeed = (gx, gy) => (gx === 0 && gy === 0 ? 7 : 1 + Math.floor(hash(gx, gy, 99) * 1e9));
+// the islands, one after another as eagles find them (k: 0 the first), each the same for everyone; each new one its
+// surprise, in turn: caves all over, a wreck on the beach (treasure round it), a farm island (barns), a lighthouse to
+// rest on, a scatter of small islands
+export const FEATURES = ['caves', 'wreck', 'farm', 'tower', 'isles'];
+export const seedOf = (k) => (k === 0 ? 7 : (1 + Math.floor(hash(k, 5, 99) * 2e7)) * FEATURES.length + ((k - 1) % FEATURES.length));
+export const featureOf = (seed) => (seed === 7 ? null : FEATURES[seed % FEATURES.length]);
+export const islandSeed = (gx, gy) => (gx === 0 && gy === 0 ? 7 : 1 + Math.floor(hash(gx, gy, 99) * 1e9)); // (as they were once, on a grid: for games kept from then)
 const SYL = [['MÖWEN', 'FELSEN', 'ADLER', 'WIND', 'MOOS', 'NEBEL', 'KIEFERN', 'STURM', 'SONNEN', 'KRÄHEN', 'BIRKEN', 'MUSCHEL'], ['HOLM', 'OOG', 'AU', 'SAND', 'WERDER', 'KLIPP', 'INSEL', 'RIFF']];
-export const islandName = (gx, gy) => SYL[0][Math.floor(hash(gx, gy, 41) * 12)] + SYL[1][Math.floor(hash(gx, gy, 42) * 8)];
+export const islandName = (seed) => (seed === 7 ? 'FELSENHOLM' : SYL[0][Math.floor(hash(seed, 1, 41) * 12)] + SYL[1][Math.floor(hash(seed, 2, 42) * 8)]);
 const GW = W / CELL, GH = H / CELL;
 
 export function makeWorld(seed = 7) {
-  const rand = rng(seed), elev = new Float32Array(GW * GH), ground = new Uint8Array(GW * GH), shape = shapeOf(seed);
+  const rand = rng(seed), elev = new Float32Array(GW * GH), ground = new Uint8Array(GW * GH), shape = shapeOf(seed), feature = featureOf(seed);
   // small islands out in the sea: a hill each, raised from the sea floor (the highest bare rock on top)
   const isles = [];
-  for (let n = 0; n < 500 && isles.length < 8; n++) {
+  for (let n = 0; n < 2000 && isles.length < (feature === 'isles' ? 26 : 8); n++) {
     const r = 40 + rand() * 75, x = r + 30 + rand() * (W - 2 * r - 60), y = r + 30 + rand() * (H - 2 * r - 60), base = elevationAt(x, y, seed, shape);
     if (base < -0.14 && isles.every((o) => Math.hypot(o.x - x, o.y - y) > o.r + r + 120)) isles.push({ x, y, r, top: 0.05 + rand() * 0.3 - base });
   }
@@ -42,7 +47,7 @@ export function makeWorld(seed = 7) {
     }
     elev[k] = e; ground[k] = e < -0.07 ? DEEP : e < 0 ? WATER : e < 0.035 ? SAND : e < MOUNT ? GRASS : e < MOUNT + 0.12 ? ROCK : SNOW;
   }
-  const w = { seed, rand, elev, ground, W, H, gw: GW, gh: GH, out: DEEP, objects: [], food: [], fish: [], gems: [], buckets: new Map(), time: 0, weather: 'sun', wind: { x: 0, y: 0 } };
+  const w = { seed, feature, rand, elev, ground, W, H, gw: GW, gh: GH, out: DEEP, objects: [], food: [], fish: [], gems: [], buckets: new Map(), time: 0, weather: 'sun', wind: { x: 0, y: 0 } };
   const at = (x, y) => terrain(w, x, y);
   // the village: a street of paths through the grass nearest the middle, houses along it, a fountain on it
   let vx = W / 2, vy = H / 2;
@@ -80,13 +85,29 @@ export function makeWorld(seed = 7) {
     if (clearFor(w, x, y, 80) && Math.hypot(x - nest.x, y - nest.y) > 80 && at(x - 26, y + 6) === GRASS && at(x + 26, y + 6) === GRASS) add(w, house(x, y, rand));
   }
   // barns in the fields (their door open, at the front), caves in the mountains' rock faces
-  for (let n = 0, made = 0; n < 300 && made < 3; n++) {
+  for (let n = 0, made = 0; n < 900 && made < (feature === 'farm' ? 6 : 3); n++) {
     const x = Math.round(100 + rand() * (W - 200)), y = Math.round(100 + rand() * (H - 200));
     if (clearFor(w, x, y, 70) && [-34, 0, 34].every((d) => at(x + d, y + 8) === GRASS && at(x + d, y - 30) === GRASS)) add(w, { art: 'barn', x, y, block: { w: 64, d: 26 }, door: true, room: `barn${made++}` });
   }
-  for (let y = 40, made = 0; y < H - 40 && made < 2; y += 24) for (let x = 40; x < W - 40 && made < 2; x += 24) {
+  const many = feature === 'caves', caves = many ? 5 : 2;
+  for (let y = 40, made = 0; y < H - 40 && made < caves; y += 24) for (let x = 40; x < W - 40 && made < caves; x += 24) {
     if (at(x, y) === ROCK && at(x, y + 16) >= GRASS && at(x, y + 16) <= ROCK && at(x, y - 20) >= ROCK && Math.hypot(x - nest.x, y - nest.y) > 200 && clearFor(w, x, y, 30)
-      && w.objects.every((o) => !o.cave || Math.hypot(o.x - x, o.y - y) > 500) && hash(x, y, seed) < 0.3) add(w, { art: 'cave', x, y, block: { r: 1 }, cave: true, room: `cave${made++}` });
+      && w.objects.every((o) => !o.cave || Math.hypot(o.x - x, o.y - y) > (many ? 260 : 500)) && hash(x, y, seed) < (many ? 0.6 : 0.3)) add(w, { art: 'cave', x, y, block: { r: 1 }, cave: true, room: `cave${made++}` });
+  }
+  // a wreck on a beach, treasure washed up round it; a lighthouse on the shore
+  const shore = (x, y) => [0, 1, 2, 3, 4, 5, 6, 7].some((k) => isWater(w, x + Math.cos(k * 0.785) * 40, y + Math.sin(k * 0.785) * 40));
+  for (let n = 0; n < 4000 && feature === 'wreck' && !w.objects.some((o) => o.art === 'wreck'); n++) {
+    const x = Math.round(60 + rand() * (W - 120)), y = Math.round(60 + rand() * (H - 120));
+    if (at(x, y) !== SAND || at(x - 22, y) !== SAND || at(x + 22, y) !== SAND || !shore(x, y) || !clearFor(w, x, y, 40)) continue;
+    add(w, { art: 'wreck', x, y, block: { w: 44, d: 10 } });
+    for (let k = 0, id = 0; k < 300 && id < 6; k++) {
+      const a = rand() * Math.PI * 2, r = 30 + rand() * 70, gx = x + Math.cos(a) * r, gy = y + Math.sin(a) * r * 0.7;
+      if ((at(gx, gy) === SAND || at(gx, gy) === GRASS) && !blocked(w, gx, gy)) w.gems.push({ id: id++, x: gx, y: gy });
+    }
+  }
+  for (let n = 0; n < 4000 && feature === 'tower' && !w.objects.some((o) => o.tower); n++) {
+    const x = Math.round(60 + rand() * (W - 120)), y = Math.round(60 + rand() * (H - 120));
+    if ((at(x, y) === GRASS || at(x, y) === SAND) && shore(x, y) && clearFor(w, x, y, 40) && Math.hypot(x - nest.x, y - nest.y) > 300) add(w, { art: 'tower', x, y, block: { r: 9 }, perch: true, tower: true });
   }
   for (let y = 16; y < H; y += 20) for (let x = 16; x < W; x += 20) {
     const px = x + (rand() - 0.5) * 14, py = y + (rand() - 0.5) * 14;
