@@ -73,6 +73,7 @@ function input(dt) { // (keys too: ←→ turn; ↑ held climbs the pace, slowly
 }
 
 function frame(now) {
+  requestAnimationFrame(frame); // (first: an error in one frame doesn't stop the game)
   const dt = Math.max(0, Math.min(0.05, (now - last) / 1000)); last = now; // (the first frame's time can be before the script ran)
   update(world, dt);
   if (started) step(bird, input(dt), dt, world);
@@ -80,7 +81,6 @@ function frame(now) {
   for (let i = particles.length - 1; i >= 0; i--) if ((particles[i].t += dt) > 1.2) particles.splice(i, 1);
   zoom += ((ZOOM_GROUND + (ZOOM_AIR - ZOOM_GROUND) * Math.min(1, bird.z / CRUISE)) - zoom) * Math.min(1, dt * 3);
   draw();
-  requestAnimationFrame(frame);
 }
 
 function draw() {
@@ -162,8 +162,10 @@ function sticksDraw(u) {
   const r = R();
   for (const s of Object.values(sticks)) {
     const [hx, hy] = s.id !== null ? [s.ox, s.oy] : home(s), across = s === sticks.turn;
+    // the track: a capsule of two half circles (roundRect: not before Safari 16)
+    const ex = across ? r * 0.68 : 0, ey = across ? 0 : r * 0.68, th = Math.atan2(ey, ex);
     ctx.fillStyle = 'rgba(253,251,246,0.18)'; ctx.strokeStyle = 'rgba(43,37,65,0.5)'; ctx.lineWidth = u;
-    ctx.beginPath(); ctx.roundRect(hx - (across ? r : r * 0.32), hy - (across ? r * 0.32 : r), across ? r * 2 : r * 0.64, across ? r * 0.64 : r * 2, r * 0.32); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.arc(hx - ex, hy - ey, r * 0.32, th + Math.PI / 2, th + Math.PI * 1.5); ctx.arc(hx + ex, hy + ey, r * 0.32, th - Math.PI / 2, th + Math.PI / 2); ctx.closePath(); ctx.fill(); ctx.stroke();
     const kx = hx + (across ? s.v * r : 0), ky = hy - (across ? 0 : s.v * r);
     ctx.fillStyle = s.id !== null ? 'rgba(253,251,246,0.75)' : 'rgba(253,251,246,0.45)';
     ctx.beginPath(); ctx.arc(kx, ky, r * 0.38, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
