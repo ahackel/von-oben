@@ -22,7 +22,24 @@ export function newGame(name, nest) {
 export const current = (save) => save.eagles.find((e) => e.id === save.current);
 // the eagle at home on that island (if any)
 export const residentOf = (save, isl) => save.eagles.find((e) => e.home === isl) || null;
-// a homeless eagle in a free nest: its home now
+// a homeless eagle on an island no eagle has: it builds its nest there, on the rock (twigs from trees, straw from
+// barns, brought one at a time); built, it is its home. What is still wanted (null: none to build there)
+export const NEST_OF = { twig: 4, straw: 2 };
+export function needs(save, e) {
+  if (e.home || residentOf(save, e.isl)) return null;
+  const got = save.nests?.[e.isl] || {};
+  return Object.fromEntries(Object.entries(NEST_OF).map(([k, n]) => [k, n - (got[k] || 0)]));
+}
+export const built = (save, isl) => save.nests?.[isl] || {}; // (how much of a nest is there)
+// a twig or straw brought to the rock: 'done' (the nest built: its home), true (one more), false (not wanted)
+export function build(save, e, kind, nest) {
+  const want = needs(save, e);
+  if (!want || !(want[kind] > 0)) return false;
+  save.nests ??= {}; const got = (save.nests[e.isl] ??= {}); got[kind] = (got[kind] || 0) + 1;
+  return Object.values(needs(save, e)).every((n) => n <= 0) && claim(save, e, nest) ? 'done' : true;
+}
+export const needSay = (want) => `NEST BAUEN: ZWEIGE ${NEST_OF.twig - want.twig}/${NEST_OF.twig}, STROH ${NEST_OF.straw - want.straw}/${NEST_OF.straw}`;
+// a homeless eagle, its nest built: its home now
 export function claim(save, e, nest) {
   if (e.home || residentOf(save, e.isl)) return false;
   e.home = e.isl; e.nest = { x: nest.x, y: nest.y }; e.brood = brood0(); return true;
@@ -61,7 +78,7 @@ export function fledge(save, e) {
 }
 // what its nest holds, said
 export function broodSay(e) {
-  if (!e.home) return 'SUCHT EIN FREIES NEST';
+  if (!e.home) return 'BAUT SICH EIN NEST AUF EINER FREIEN INSEL';
   const b = e.brood;
   if (b.stage === 'none') return `EI IN ${EGG_AFTER - b.days} TAGEN`;
   if (b.stage === 'egg') return 'EIN EI IM NEST';

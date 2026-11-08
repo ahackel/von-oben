@@ -1,7 +1,7 @@
 // npm test: the island and the eagle without a screen: there is land and sea, a village; the eagle takes off, flies,
 // gets tired, glides down and lands when let go; it can't walk through a house; it eats; it swims, dives and (with luck) catches a fish.
 import assert from 'node:assert/strict';
-import { makeWorld, makeRoom, update, setWeather, terrain, isWater, blocked, doorAt, seedOf, W, H, GRASS, ROCK, DEEP, WALL, PERCH } from '../src/world.js';
+import { makeWorld, makeRoom, makeSea, LONG, onIce, floesOf, update, setWeather, terrain, isWater, blocked, doorAt, seedOf, W, H, GRASS, ROCK, DEEP, WALL, PERCH } from '../src/world.js';
 import * as fam from '../src/family.js';
 import { makeBird, step, CRUISE } from '../src/bird.js';
 
@@ -151,6 +151,36 @@ for (const kind of ['barn', 'cave']) {
   const fb = makeBird(w.nest.x, w.nest.y, PERCH); fb.prey = 'mouse'; fb.feeds = true; fb.energy = 50;
   run(fb, { push: 0 }, 1);
   assert.ok(!fb.prey && fb.energy >= 50 && fb.events.some((v) => v.type === 'feed'), 'fed to the chick');
+}
+// swimming by a fish: diving, it has it (every time)
+{ const f = w.fish[3], d = makeBird(f.x + 5, f.y); d.state = 'swim'; d.wet = 1; f.t = 0; run(d, { push: -1 }, 0.1); run(d, { push: 0 }, 1.5); assert.equal(d.prey, 'fish', 'dived by a fish: caught'); }
+// cold a while: floes on the sea near the shore, to stand on
+{
+  assert.equal(floesOf(w).length, 0, 'no ice when warm');
+  w.ice = 1; const fl = floesOf(w)[0]; assert.ok(fl && isWater(w, fl.x, fl.y) && onIce(w, fl.x, fl.y), 'floes on the sea');
+  const ib = makeBird(fl.x, fl.y, 10); ib.state = 'air'; run(ib, { push: 0 }, 1);
+  assert.ok(ib.state === 'ground' && ib.z === 0, 'landed on the ice, not in the sea'); w.ice = 0;
+}
+// a new nest: twigs from a tree, straw (from a barn's hay), brought to the rock; built, its home
+{
+  const save = fam.newGame('ADA', w.nest), k = fam.fledge(save, Object.assign(fam.current(save), { brood: { stage: 'chick', days: 0, chick: { name: 'BO', look: 3, fed: 0, grown: 3, ready: true } } }));
+  assert.equal(fam.needs(save, k), null, 'its parent\'s island: no nest to build');
+  k.isl = fam.onward(save, k); assert.deepEqual(fam.needs(save, k), { twig: 4, straw: 2 });
+  const tree = w.objects.find((o) => /^pine/.test(o.art)), tb = makeBird(tree.x + 8, tree.y); tb.wants = fam.needs(save, k); run(tb, { push: 0 }, 0.2);
+  assert.equal(tb.prey, 'twig', 'a twig picked up by a tree');
+  run(tb, { push: 0 }, 2); assert.equal(tb.prey, 'twig', 'not eaten');
+  const nb = makeBird(w.nest.x, w.nest.y, PERCH); nb.prey = 'twig'; nb.nestOk = false; run(nb, { push: 0 }, 1);
+  assert.ok(!nb.prey && nb.events.some((v) => v.type === 'build'), 'brought to the rock');
+  assert.equal(fam.build(save, k, 'straw', w.nest), true); assert.equal(fam.build(save, k, 'straw', w.nest), true); assert.equal(fam.build(save, k, 'straw', w.nest), false, 'enough straw');
+  for (let n = 0; n < 3; n++) fam.build(save, k, 'twig', w.nest);
+  assert.equal(fam.build(save, k, 'twig', w.nest), 'done'); assert.equal(k.home, k.isl, 'built: its home');
+}
+// the open sea between islands: long, rocks along it to rest on (a little), fish round them
+{
+  const sw = makeSea({ across: true, d: 1, lat: 1500, seed: 4 }), rk = sw.objects.filter((o) => o.perch);
+  assert.ok(sw.W === LONG && rk.length >= 4 && sw.fish.length > 40, `the open sea (${rk.length} rocks)`);
+  const rb = makeBird(rk[0].x, rk[0].y, PERCH); rb.energy = 20; for (let t = 0; t < 3; t += 1 / 60) step(rb, { push: 0 }, 1 / 60, sw);
+  assert.ok(rb.energy > 25 && !rb.asleep, 'resting on a rock at sea');
 }
 // each new island its surprise
 assert.deepEqual([1, 2, 3, 4, 5].map((k) => makeWorld(seedOf(k)).feature), ['caves', 'wreck', 'farm', 'tower', 'isles']);

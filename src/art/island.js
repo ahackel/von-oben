@@ -1,7 +1,7 @@
 // What stands and lies about on the island, drawn pixel by pixel (see pixels.js), lit from the top left: houses (a
 // roof seen from above and the front, the wall below with windows and a door), trees (pines and round leafy ones, in
 // rows made here, as big beside the eagle as trees should be), the nest, the eagle's food and the fish.
-import { sprite } from '../pixels.js';
+import { sprite, over } from '../pixels.js';
 import { GARDEN } from './garden.js';
 import { PERCH } from '../world.js';
 
@@ -98,8 +98,9 @@ function nestRows() {
 const NEST = { nest: { keys: { B: 'ochre', L: 'ochre.light', T: 'brown', t: 'camel.light', H: 'darkBrown', h: 'deepBrown' }, rows: nestRows() } };
 
 // rocks: lumps of stone, in facets (the light by which way each faces, in steps), cracked here and there
-const STONE = { N: 'lightGrey', G: 'blueGrey', g: 'slate', E: 'charcoal', S: 'white' };
-function rockRows(w, h, s, snow) {
+const STONE = { N: 'lightGrey', G: 'blueGrey', g: 'slate', E: 'charcoal', S: 'white', M: 'lightGreen', m: 'green.shade' };
+const SANDSTONE = { N: 'sand.light', G: 'camel', g: 'ochre.shade', E: 'brown.shade', S: 'white', M: 'lightGreen', m: 'green.shade' };
+function rockRows(w, h, s, snow, moss) { // (moss: on its top, in patches)
   const rows = [], c = (w - 1) / 2;
   for (let y = 0; y < h; y++) {
     let r = '';
@@ -107,7 +108,7 @@ function rockRows(w, h, s, snow) {
       const dx = (x - c) / (w / 2), dy = (y - h * 0.62) / (h * 0.62), a = Math.atan2(dy, dx);
       if (Math.hypot(dx, dy * (dy > 0 ? 1.6 : 1)) - Math.sin(a * 3 + s) * 0.1 > 1 || y > h - 1) { r += '.'; continue; }
       const facet = Math.round(a / (Math.PI / 3)) * (Math.PI / 3), l = -Math.cos(facet) * 0.6 - Math.sin(facet) * 0.8;
-      r += (x * 5 + y * 3 + s) % 13 === 0 && dy > -0.3 ? 'k' : snow && dy < -0.35 ? 'S' : l > 0.5 ? 'N' : l > -0.1 ? 'G' : l > -0.6 ? 'g' : 'E';
+      r += (x * 5 + y * 3 + s) % 13 === 0 && dy > -0.3 ? 'k' : snow && dy < -0.35 ? 'S' : moss && dy < -0.25 && speck(x, y, s) > 0.35 ? (l > 0.3 ? 'M' : 'm') : l > 0.5 ? 'N' : l > -0.1 ? 'G' : l > -0.6 ? 'g' : 'E';
     }
     rows.push(r);
   }
@@ -115,8 +116,14 @@ function rockRows(w, h, s, snow) {
 }
 const ROCKS = {};
 [[14, 10], [20, 13], [11, 8], [26, 18]].forEach(([w, h], i) => { ROCKS[`rock${i}`] = { keys: STONE, rows: rockRows(w, h, i, i === 3) }; });
+// more of them: mossy, flat, a sandstone one, a tall one, two lying together, a snowy one
+ROCKS.rock4 = { keys: STONE, rows: rockRows(17, 11, 4, false, true) };
+ROCKS.rock5 = { keys: STONE, rows: rockRows(24, 9, 5, false, true) };
+ROCKS.rock6 = { keys: SANDSTONE, rows: rockRows(16, 12, 6) };
+ROCKS.rock7 = { keys: STONE, rows: over(rockRows(21, 12, 7), rockRows(10, 8, 9), 13, 6) }; // (a big one, a small one by it)
+ROCKS.rock8 = { keys: STONE, rows: rockRows(18, 20, 8, true) };
 // the nest's rock: a pillar, its flat top (lit) PERCH px up from its foot, its faces shaded by which way they look, cracks down them
-function cragRows(w = 44, top = 14) {
+function cragRows(w = 44, top = 14, weed = false) { // (weed: seaweed at its foot)
   const h = PERCH + top / 2, rows = [], c = (w - 1) / 2;
   for (let y = 0; y < h; y++) {
     let r = '';
@@ -125,13 +132,15 @@ function cragRows(w = 44, top = 14) {
       const half = 0.95 + Math.sin(y * 0.7 + x) * 0.04 + (y / h) * 0.05;
       if (onTop) r += Math.hypot(dx * 1.05, ty) > 0.88 && ty > 0 ? 'g' : (x + y * 3) % 9 === 0 ? 'G' : 'N';
       else if (y < top / 2 || Math.abs(dx) > half) r += '.';
-      else r += (x % 7 === 3 && (y * 2 + x) % 9 < 5) ? 'k' : y > h - 3 ? 'E' : dx < -0.45 ? 'G' : dx < 0.35 ? 'g' : 'E';
+      else r += (x % 7 === 3 && (y * 2 + x) % 9 < 5) ? 'k' : weed && y > h - 7 && speck(x, y, 3) > 0.4 ? 'm' : y > h - 3 ? 'E' : dx < -0.45 ? 'G' : dx < 0.35 ? 'g' : 'E';
     }
     rows.push(r);
   }
   return rows;
 }
 ROCKS.crag = { keys: STONE, rows: cragRows() };
+ROCKS.crag1 = { keys: STONE, rows: cragRows(34, 12, true) }; // (narrower, weed at its foot)
+ROCKS.crag2 = { keys: STONE, rows: cragRows(50, 16, true) }; // (wide)
 
 const SMALL = {
   mouse: { keys: { G: 'grey.light', g: 'grey', s: 'grey.shade', p: 'pink' }, rows: ['.GG......', 'GGGGGG...', 'peGGGGGg.', '.gggggggp', '..s...s..'] }, // (facing left: an ear up, the legs down, its tail out behind)
@@ -183,6 +192,8 @@ const ROOMS = {
   gem: { keys: { W: 'white', B: 'blue.light', b: 'blue', p: 'purple' }, rows: ['..W..', '.WBb.', 'WBbbp', '.bbp.', '..p..'] },
   bat: { keys: { M: 'mauve.shade', m: 'mauve.dark' }, rows: ['m.......m', 'mM.M.M.Mm', '.MMMeMMM.', '....M....'] }, // (wings up)
   bat1: { keys: { M: 'mauve.shade', m: 'mauve.dark' }, rows: ['...M.M...', '.MMMeMMM.', 'mM..M..Mm', 'm.......m'] }, // (down)
+  twig: { keys: { B: 'brown', b: 'brown.shade', G: 'green' }, rows: ['G.....', '.B...G', '..BBB.', '.....b'] },
+  straw: { keys: { Y: 'yellow.light', y: 'ochre' }, rows: ['Y.y.Y', '.YyY.', 'yY.Yy'] },
   egg: { keys: { C: 'cream.light', c: 'cream', s: 'beige.shade' }, rows: ['.CC.', 'CCCc', 'CsCc', 'cccs', '.ss.'] },
 };
 const make = (defs) => Object.fromEntries(Object.entries(defs).map(([k, d]) => [k, sprite({ name: k, ...d })]));

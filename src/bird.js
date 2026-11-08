@@ -4,11 +4,12 @@
 // on the sea, to dive; flying, to stoop). Let go and it slows, glides down and lands. It hunts stooping: down fast on
 // a mouse, beetle, worm or fish, it has it in its claws; eaten only on land. Rocks (PERCH px up) to land on; one its
 // home, a nest: sitting still in it, it falls asleep and its energy fills up.
-import { W, H, SEA, PERCH, WALL, terrain, blocked, isWater, perchNear, snatch, take, alive, nearestPrey, FOOD } from './world.js';
+import { W, H, SEA, PERCH, WALL, terrain, blocked, wet as isWater, perchNear, snatch, take, alive, nearestPrey, gatherAt, FOOD } from './world.js';
 
 export const CRUISE = 90, HIGH = 150; // (the height it flies at; up to, the stick right up: over the clouds)
 const NEST = 10, SLEEP_AFTER = 1, REST = 25; // (how near the nest's middle it sits in it; still how long till asleep; energy a second asleep)
-const WALK = 18, RUN = 40, TAKEOFF = 56, FAST = 95, SWIM = 16, GLIDE = 30, DIVE = 1.1, CATCH = 22, LUCK = 0.55;
+const WALK = 18, RUN = 40, TAKEOFF = 56, FAST = 95, SWIM = 16, GLIDE = 30, DIVE = 1.1, ROCK_REST = 3; // (energy a second, sitting still on a rock)
+export const REACH = 30; // (swimming: a fish this near, diving, it has it)
 const STOOP = 75, CLAW = 16, EAT = 0.7; // (how fast it falls stooping; how near it snatches; how long eating takes)
 const PECK = 9, SPOT = 70, LOSE = 120, FOCUS = 0.8, HOMING = 40; // (on foot: how near it grabs; flying: how near prey is spotted, lost; how long till it is fixed on it; how far a rock draws it in, gliding down)
 const toward = (v, t, d) => (v < t ? Math.min(t, v + d) : Math.max(t, v - d));
@@ -24,7 +25,7 @@ export function step(b, { turn = 0, push = 0 }, dt, w) {
   let cost = 0;
   const perched = b.state === 'ground' && b.z > 0;
   if (perched) b.perch ??= perchNear(w, b.x, b.y, NEST * 2);
-  const inNest = perched && b.perch?.nest && b.nestOk !== false && Math.hypot(b.x - b.perch.x, b.y - b.perch.y) < NEST;
+  const onRock = perched && b.perch?.nest && Math.hypot(b.x - b.perch.x, b.y - b.perch.y) < NEST, inNest = onRock && b.nestOk !== false;
   if (b.state === 'ground' || b.state === 'swim') {
     const swim = b.state === 'swim'; b.wet = swim ? (b.wet || 0) + dt : 0; // (just down in the sea from a stoop: not diving yet)
     const t = off ? TAKEOFF + 4 : Math.min(paced(push), swim ? SWIM : RUN);
@@ -33,19 +34,26 @@ export function step(b, { turn = 0, push = 0 }, dt, w) {
     else if (swim && push < -0.5 && b.wet > 0.5) { b.state = 'dive'; b.dive = DIVE; b.v *= 0.3; b.events.push({ type: 'splash', x: b.x, y: b.y }); }
     cost = swim ? 0.4 : b.v > WALK + 2 ? 0.6 : b.v > 1 ? 0.2 : 0;
     if (!swim && !b.z && !b.prey) { const kind = snatch(w, b.x, b.y, PECK); if (kind) { b.prey = kind; b.events.push({ type: 'catch', kind, x: b.x, y: b.y }); } } // (on foot: grabbed)
-    if (!swim && b.prey && b.v < 3) { // (on land, with its prey: eating it; in the nest, a chick hungry: feeding it)
-      if (inNest && b.feeds && (b.eating += dt) > EAT) { b.events.push({ type: 'feed', kind: b.prey, x: b.x, y: b.y - b.z }); b.prey = null; b.eating = 0; }
-      else if (!(inNest && b.feeds) && (b.eating += dt) > EAT) { b.energy += FOOD[b.prey]; b.events.push({ type: 'eat', x: b.x, y: b.y - b.z, value: FOOD[b.prey] }); b.prey = null; b.caught++; b.eating = 0; }
+    if (!swim && !b.z && !b.prey && b.wants) { const m = gatherAt(w, b.x, b.y); if (m && b.wants[m] > 0) { b.prey = m; b.events.push({ type: 'catch', kind: m, x: b.x, y: b.y }); } } // (building: a twig, straw picked up)
+    const mat = !(b.prey in FOOD); // (a twig, straw: not to eat, only to build with, on the nest's rock)
+    if (!swim && b.prey && b.v < 3 && (!mat || onRock)) { // (on land, with its prey: eating it; in the nest, a chick hungry: feeding it)
+      if ((b.eating += dt) > EAT) {
+        if (mat) b.events.push({ type: 'build', kind: b.prey, x: b.x, y: b.y - b.z });
+        else if (inNest && b.feeds) b.events.push({ type: 'feed', kind: b.prey, x: b.x, y: b.y - b.z });
+        else { b.energy += FOOD[b.prey]; b.events.push({ type: 'eat', x: b.x, y: b.y - b.z, value: FOOD[b.prey] }); b.caught++; }
+        b.prey = null; b.eating = 0;
+      }
     } else b.eating = 0;
     b.still = inNest && b.v < 1 && push <= 0.02 ? b.still + dt : 0;
     b.asleep = b.still > SLEEP_AFTER;
     if (b.asleep) cost = -REST;
+    else if (perched && !b.perch?.nest && b.v < 1 && push <= 0.02) cost = -ROCK_REST; // (on a rock at sea: resting a little)
   } else if (b.state === 'dive') {
     b.v = toward(b.v, 0, 20 * dt); cost = 2;
     if ((b.dive -= dt) <= 0) {
       b.state = 'swim';
-      const f = w.fish.filter((f) => f.t <= 0).find((f) => Math.hypot(f.x - b.x, f.y - b.y) < CATCH);
-      if (f && !b.prey && w.rand() < LUCK) { f.t = 20; b.prey = 'fish'; b.events.push({ type: 'catch', kind: 'fish', x: b.x, y: b.y }); }
+      const f = w.fish.filter((f) => f.t <= 0).find((f) => Math.hypot(f.x - b.x, f.y - b.y) < REACH);
+      if (f && !b.prey) { f.t = 20; b.prey = 'fish'; b.events.push({ type: 'catch', kind: 'fish', x: b.x, y: b.y }); }
       else b.events.push({ type: 'miss', x: b.x, y: b.y });
     }
   } else { // air
@@ -90,7 +98,8 @@ export function step(b, { turn = 0, push = 0 }, dt, w) {
   const stop = (x, y) => (grounded ? blocked(w, x, y) : terrain(w, x, y) === WALL); // (inside, even flying: the walls)
   if (!stop(b.x + dx, b.y)) b.x += dx;
   if (!stop(b.x, b.y + dy)) b.y += dy;
-  if (!w.room) { b.x = Math.max(-SEA - 40, Math.min(W + SEA + 40, b.x)); b.y = Math.max(-SEA - 40, Math.min(H + SEA + 40, b.y)); } // (beyond the sea's edge: the next island, see main)
+  if (w.room === 'sea') { b.x = Math.max(-40, Math.min(w.W + 40, b.x)); b.y = Math.max(-40, Math.min(w.H + 40, b.y)); } // (its ends: on, or back: see main)
+  else if (!w.room) { b.x = Math.max(-SEA - 40, Math.min(W + SEA + 40, b.x)); b.y = Math.max(-SEA - 40, Math.min(H + SEA + 40, b.y)); } // (beyond the sea's edge: the next island, see main)
   b.stride += b.v * dt;
   if (b.state === 'ground' && b.z > 0 && (!b.perch || Math.hypot(b.x - b.perch.x, b.y - b.perch.y) > NEST)) b.state = 'air'; // (off the rock's edge: gliding)
   else if (b.state === 'ground' && !b.z && isWater(w, b.x, b.y)) { b.state = 'swim'; b.v = Math.min(b.v, SWIM); b.events.push({ type: 'splash', x: b.x, y: b.y }); }

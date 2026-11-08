@@ -29,6 +29,7 @@ export const islandSeed = (gx, gy) => (gx === 0 && gy === 0 ? 7 : 1 + Math.floor
 const SYL = [['MÖWEN', 'FELSEN', 'ADLER', 'WIND', 'MOOS', 'NEBEL', 'KIEFERN', 'STURM', 'SONNEN', 'KRÄHEN', 'BIRKEN', 'MUSCHEL'], ['HOLM', 'OOG', 'AU', 'SAND', 'WERDER', 'KLIPP', 'INSEL', 'RIFF']];
 export const islandName = (seed) => (seed === 7 ? 'FELSENHOLM' : SYL[0][Math.floor(hash(seed, 1, 41) * 12)] + SYL[1][Math.floor(hash(seed, 2, 42) * 8)]);
 const GW = W / CELL, GH = H / CELL;
+const ROCK_ARTS = ['rock0', 'rock1', 'rock2', 'rock4', 'rock5', 'rock6', 'rock7'], CRAGS = ['crag', 'crag1', 'crag2']; // (see art/island.js)
 
 export function makeWorld(seed = 7) {
   const rand = rng(seed), elev = new Float32Array(GW * GH), ground = new Uint8Array(GW * GH), shape = shapeOf(seed), feature = featureOf(seed);
@@ -47,7 +48,7 @@ export function makeWorld(seed = 7) {
     }
     elev[k] = e; ground[k] = e < -0.07 ? DEEP : e < 0 ? WATER : e < 0.035 ? SAND : e < MOUNT ? GRASS : e < MOUNT + 0.12 ? ROCK : SNOW;
   }
-  const w = { seed, feature, rand, elev, ground, W, H, gw: GW, gh: GH, out: DEEP, objects: [], food: [], fish: [], gems: [], buckets: new Map(), time: 0, weather: 'sun', wind: { x: 0, y: 0 } };
+  const w = { seed, feature, rand, elev, ground, W, H, gw: GW, gh: GH, out: DEEP, objects: [], food: [], fish: [], gems: [], buckets: new Map(), time: 0, weather: 'sun', wind: { x: 0, y: 0 }, floes: [], ice: 0 };
   const at = (x, y) => terrain(w, x, y);
   // the village: a street of paths through the grass nearest the middle, houses along it, a fountain on it
   let vx = W / 2, vy = H / 2;
@@ -77,7 +78,7 @@ export function makeWorld(seed = 7) {
   for (let n = 0, made = 0; n < 800 && made < 12; n++) {
     const x = Math.round(-SEA * 0.8 + rand() * (W + SEA * 1.6)), y = Math.round(-SEA * 0.8 + rand() * (H + SEA * 1.6));
     const open = [0, 1, 2, 3, 4, 5].every((k) => terrain(w, x + Math.cos(k * 1.05) * 30, y + Math.sin(k * 1.05) * 30) === DEEP);
-    if (open && Math.hypot(x - W / 2, y - H / 2) < W * 0.85 && w.objects.every((o) => !o.perch || Math.hypot(o.x - x, o.y - y) > 380)) { add(w, { art: 'crag', x, y, block: { r: 16 }, perch: true }); made++; }
+    if (open && Math.hypot(x - W / 2, y - H / 2) < W * 0.85 && w.objects.every((o) => !o.perch || Math.hypot(o.x - x, o.y - y) > 380)) { add(w, { art: CRAGS[Math.floor(rand() * 3)], x, y, block: { r: 16 }, perch: true }); made++; }
   }
   // farms here and there; woods where a second noise says so, a tree or bush now and then elsewhere
   for (let n = 0; n < 8; n++) {
@@ -114,7 +115,7 @@ export function makeWorld(seed = 7) {
     if (!clearFor(w, px, py, 18) || Math.hypot(px - nest.x, py - nest.y) < 40) continue;
     const here = at(px, py);
     if (here >= ROCK || ((here === GRASS || here === SAND) && rand() < 0.012)) { // (rocks: all over the mountains, a few elsewhere)
-      if (here === SNOW || rand() < (here === ROCK ? 0.45 : 1)) add(w, { art: here === SNOW ? 'rock3' : `rock${Math.floor(rand() * 3)}`, x: Math.round(px), y: Math.round(py), block: { r: 6 } });
+      if (here === SNOW || rand() < (here === ROCK ? 0.45 : 1)) add(w, { art: here === SNOW ? (rand() < 0.5 ? 'rock3' : 'rock8') : ROCK_ARTS[Math.floor(rand() * ROCK_ARTS.length)], x: Math.round(px), y: Math.round(py), block: { r: 6 } });
       continue;
     }
     if (here !== GRASS || at(px, py - 24) !== GRASS) continue;
@@ -122,6 +123,12 @@ export function makeWorld(seed = 7) {
     if (wood ? r < 0.8 : r < 0.04) add(w, { art: `${rand() < 0.55 ? 'pine' : 'oak'}${Math.floor(rand() * 3)}`, ...at2, block: { r: 4 } });
     else if (r > 0.975) add(w, { art: ['bush', 'bush2', 'bush3'][Math.floor(rand() * 3)], ...at2, block: { r: 4 } });
   }
+  // where ice floes drift when it has been cold a while: the sea near the shore (only as many as it is cold: see setIce)
+  for (let n = 0; n < 4000 && w.floes.length < 90; n++) {
+    const x = rand() * W, y = rand() * H, e = elevation(w, x, y), r = 9 + rand() * 18;
+    if (e < -0.02 && e > -0.22 && w.floes.every((f) => Math.hypot(f.x - x, f.y - y) > f.r + r + 6)) w.floes.push({ x, y, r, s: rand() * 100 });
+  }
+  w.floes.sort((a, b) => elevation(w, b.x, b.y) - elevation(w, a.x, a.y)); // (the first to freeze: the nearest the shore)
   for (let n = 0; n < 160; n++) w.food.push(placeFood(w, { gone: 0 }));
   for (let n = 0; n < 180; n++) { const f = { a: rand() * 6.3, t: 0 }; spot(w, f, (t) => t === WATER || t === DEEP); w.fish.push(f); }
   return w;
@@ -132,6 +139,10 @@ export function terrain(w, x, y) {
   return i < 0 || j < 0 || i >= w.gw || j >= w.gh ? w.out : w.ground[j * w.gw + i];
 }
 export const isWater = (w, x, y) => terrain(w, x, y) <= WATER;
+// the floes frozen now (of all the places for them: as many as ice says, 0 .. 1)
+export const floesOf = (w) => (w.floes || []).slice(0, Math.round((w.ice || 0) * (w.floes?.length || 0)));
+export const onIce = (w, x, y) => floesOf(w).some((f) => Math.hypot(f.x - x, (f.y - y) * 1.6) < f.r);
+export const wet = (w, x, y) => isWater(w, x, y) && !onIce(w, x, y); // (in the sea, not on a floe)
 export const elevation = (w, x, y) => { const i = Math.floor(x / CELL), j = Math.floor(y / CELL); return !w.elev || i < 0 || j < 0 || i >= w.gw || j >= w.gh ? -1 : w.elev[j * w.gw + i]; };
 
 function paint(w, x, y, ww, hh, t) {
@@ -194,6 +205,11 @@ function placeFood(w, f) {
   f.gone = 0; f.a = w.rand() * 6.3; f.run = 0; f.scare = 0;
   return spot(w, f, fits(f.kind));
 }
+// what a nest is built of, to be had at (x, y) on foot: a twig by a tree, straw by a bale of hay (in a barn)
+export function gatherAt(w, x, y) {
+  const o = near(w, x, y, (o) => (/^(pine|oak)/.test(o.art) && Math.hypot(o.x - x, o.y - y) < 10) || (o.art === 'hay' && Math.abs(o.x - x) < 18 && y < o.y + 7 && y > o.y - 18));
+  return o ? (o.art === 'hay' ? 'straw' : 'twig') : null;
+}
 // a perch (a rock's flat top) within r of (x, y)
 export const perchNear = (w, x, y, r) => near(w, x, y, (o) => o.perch && Math.hypot(o.x - x, o.y - y) < r);
 // snatching what is within r of (x, y): a mouse, beetle, worm or a fish (gone for a while, elsewhere); what it was
@@ -233,12 +249,30 @@ export function update(w, dt, b) {
   }
 }
 
+// the open sea between two islands (r: across, east-west or not; d: which way, 1 or -1; lat: where it came out, across
+// the way): LONG px of it, as wide as an island and its sea; rocks along the way to rest on, wandering from side to
+// side round where it came out; fish
+export const LONG = 3600;
+export function makeSea(r) {
+  const rand = rng(r.seed), wide = (r.across ? H : W) + 2 * SEA;
+  const w = { seed: r.seed, rand, elev: null, ground: new Uint8Array(0), W: r.across ? LONG : wide, H: r.across ? wide : LONG, gw: 0, gh: 0, out: DEEP, objects: [], food: [], fish: [], gems: [],
+    buckets: new Map(), time: 0, weather: 'sun', wind: { x: 0, y: 0 }, room: 'sea', floes: [], ice: 0 };
+  let lat = r.lat;
+  for (let p = 420 + rand() * 120; p < LONG - 300; p += 520 + rand() * 160) {
+    lat = Math.max(200, Math.min(wide - 200, lat + (rand() - 0.5) * 360));
+    const q = r.d > 0 ? p : LONG - p;
+    add(w, { art: CRAGS[Math.floor(rand() * 3)], x: Math.round(r.across ? q : lat), y: Math.round(r.across ? lat : q), block: { r: 16 }, perch: true });
+  }
+  for (const o of [...w.objects]) for (let n = 0; n < 14; n++) { const a = rand() * 6.3, d = 40 + rand() * 260; w.fish.push({ x: o.x + Math.cos(a) * d, y: o.y + Math.sin(a) * d, a: rand() * 6.3, t: 0 }); } // (fish round the rocks)
+  return w;
+}
+
 // inside: a cave (tunnels dug by a wandering walk from its mouth, dark, bats and beetles, treasure to find) or a barn
 // (a room of straw, hay bales, beams up to sit on, mice everywhere). Low: the eagle flies no higher than its roof
 export function makeRoom(kind, seed) {
   const cave = kind === 'cave', RW = cave ? 1000 : 340, RH = cave ? 760 : 230, gw = RW / CELL, gh = RH / CELL, rand = rng(seed);
   const w = { seed, rand, elev: null, ground: new Uint8Array(gw * gh).fill(WALL), W: RW, H: RH, gw, gh, out: WALL, objects: [], food: [], fish: [], gems: [], buckets: new Map(),
-    time: 0, weather: kind, wind: { x: 0, y: 0 }, room: kind, roof: cave ? 22 : PERCH + 12, exit: { x: RW / 2, y: RH - 14 } };
+    time: 0, weather: kind, wind: { x: 0, y: 0 }, floes: [], ice: 0, room: kind, roof: cave ? 22 : PERCH + 12, exit: { x: RW / 2, y: RH - 14 } };
   const dig = (x, y, r) => { for (let j = Math.floor((y - r) / CELL); j <= (y + r) / CELL; j++) for (let i = Math.floor((x - r) / CELL); i <= (x + r) / CELL; i++) if (i > 3 && j > 3 && i < gw - 4 && j < gh - 1 && Math.hypot(i * CELL - x, j * CELL - y) < r) w.ground[j * gw + i] = cave ? CAVE : FLOOR; };
   if (cave) {
     const walk = (x, y, a, n) => {
