@@ -24,7 +24,7 @@ let day = 0.08;
 const WEATHERS = ['sun', 'rain', 'fog', 'wind', 'snow', 'storm'], SAY = { sun: ['SONNE', 'EIDECHSEN SONNEN SICH'], rain: ['REGEN', 'WÜRMER UND FRÖSCHE KOMMEN RAUS'],
   fog: ['NEBEL', 'DIE MÄUSE WAGEN SICH RAUS'], wind: ['WIND', 'KÄFER KRABBELN, DER WIND TREIBT DICH AB'],
   snow: ['SCHNEE', 'MÄUSE IM SCHNEE SIEHT MAN GUT'], storm: ['GEWITTER', 'FRÖSCHE UND WÜRMER, ABER STURM!'] };
-let wfade = 1, banner = 0;
+let wfade = 1;
 // a day's weather on an island: the first day sun, then spells of 2 to 4 days each the same (never the same spell
 // twice running)
 const pick = (k, seed) => WEATHERS[Math.floor(hash(k, seed % 100000, 9) * WEATHERS.length)];
@@ -39,20 +39,22 @@ function setDay(w, n) { setWeather(w, weatherOf(n, island.seed)); w.ice = Math.m
 let cover = 0; // (the snow lying on the land: 0 .. 1, growing while it snows, melting after)
 function newDay() {
   const ev = fam.nextDay(me);
-  setDay(island, me.dayN); wfade = 0; banner = 6;
+  setDay(island, me.dayN); wfade = 0; say(SAY[island.weather][1]);
   if (world.room === 'sea') setWeather(world, island.weather);
   if (ev === 'egg') say('EIN EI IM NEST!');
   if (ev === 'grown') say(`${me.brood.chick.name} IST GROSS! UNTER "ADLER": AUSFLIEGEN`);
   if (ev === 'hatch') ui.ask('EIN KÜKEN IST GESCHLÜPFT!', picture((g) => drawChick(g, 0, 0, 0, 'stand'), 40, 30, 4), 'WIE SOLL ES HEISSEN?').then((n) => { me.brood.chick.name = n; fam.store(save); });
   fam.store(save);
 }
-const say = (text) => { notice = { text, t: 7 }; };
+// what is said: one line at a time (several: one after the other), under the day's name
+const notes = [];
+const say = (text) => { notes.push(...text.split('\n')); notes.splice(0, notes.length - 4); if (!notice) notice = { text: notes.shift(), t: 3 }; };
 function sky() {
   const i = SKY.findIndex(([at]) => at > day), [a0, c0, d0] = SKY[i - 1], [a1, c1, d1] = SKY[i], f = (day - a0) / (a1 - a0), e = f * f * (3 - 2 * f);
   return [mix(c0, c1, e), d0 + (d1 - d0) * e];
 }
 globalThis.vonOben = { get bird() { return bird; }, get world() { return world; }, get me() { return me; }, save, setDay: (d) => (day = d), newDay, play }; // (to look into, from the console)
-const ZOOM_GROUND = 4, ZOOM_AIR = 1.5, VERSION = 'V17'; // (on the title: is the new code there?)
+const ZOOM_GROUND = 4, ZOOM_AIR = 1.5, VERSION = 'V18'; // (on the title: is the new code there?)
 
 function resize() {
   dpr = window.devicePixelRatio || 1; cw = cv.width = Math.round(innerWidth * dpr); ch = cv.height = Math.round(innerHeight * dpr);
@@ -177,7 +179,7 @@ function crossing() {
   bird.perch = null; bird.target = null; wake.length = 0;
   if (!on) { say(`ZURÜCK: INSEL ${islandName(me.isl)}`); stash(); fam.store(save); return; }
   const rs = fam.residentOf(save, me.isl);
-  say(`INSEL ${islandName(me.isl)}${rs && rs !== me ? `\nHIER WOHNT ${rs.name}` : !me.home ? '\nNOCH FREI: BAU DIR HIER EIN NEST!' : ''}${island.feature ? `\n${SURPRISE[island.feature]}` : ''}`);
+  say(`INSEL ${islandName(me.isl)}${rs && rs !== me ? `\nHIER WOHNT ${rs.name}` : !me.home ? '\nNOCH FREI: BAU DIR HIER EIN NEST!\nZWEIGE: AN BÄUMEN, STROH: IN SCHEUNEN' : ''}${island.feature ? `\n${SURPRISE[island.feature]}` : ''}`);
   stash(); fam.store(save);
 }
 const SURPRISE = { caves: 'VOLLER HÖHLEN!', wreck: 'EIN WRACK AM STRAND!', farm: 'EINE BAUERNINSEL!', tower: 'MIT LEUCHTTURM!', isles: 'VIELE KLEINE INSELN!' };
@@ -245,7 +247,7 @@ function frame(now) {
     else if (world.exit && bird.y > world.exit.y - 12 && Math.abs(bird.x - world.exit.x) < 22) goOut();
     for (const g of world.gems) { // (treasure: picked up, low, kept found)
       const k = `${world.seed}:${g.id}`;
-      if (!save.gems[k] && bird.z < 12 && Math.hypot(g.x - bird.x, g.y - bird.y) < 10) { save.gems[k] = 1; me.gems++; particles.push({ type: 'gem', x: g.x, y: g.y, t: 0 }); fam.store(save); }
+      if (!save.gems[k] && bird.z < 12 && Math.hypot(g.x - bird.x, g.y - bird.y) < 10) { save.gems[k] = 1; me.gems++; say('EIN SCHATZ!'); fam.store(save); }
     }
     if ((saveAt -= dt) < 0) { saveAt = 5; stash(); fam.store(save); }
     const was = day;
@@ -253,11 +255,13 @@ function frame(now) {
     if (was < 0.95 && day >= 0.95) newDay();
   }
   cover = Math.max(0, Math.min(1, cover + (island.weather === 'snow' ? dt / 40 : -dt / 60))); // (snowing: covered in 40 s; after: melted in a minute)
-  wfade = Math.min(1, wfade + dt / 6); banner = Math.max(0, banner - dt); if (notice) notice.t -= dt;
+  wfade = Math.min(1, wfade + dt / 6); if (notice && (notice.t -= dt * (notes.length ? 1.5 : 1)) <= 0) notice = notes.length ? { text: notes.shift(), t: 3 } : null;
   for (const e of bird.events.splice(0)) {
     if (e.type === 'feed') fam.feed(me);
-    if (e.type === 'build') { const b = fam.build(save, me, e.kind, island.nest); if (b === 'done') say('DEIN NEST IST FERTIG!\nHIER WOHNST DU JETZT'); fam.store(save); }
+    if (e.type === 'build') { const b = fam.build(save, me, e.kind, island.nest); say(b === 'done' ? 'DEIN NEST IST FERTIG!\nHIER WOHNST DU JETZT' : 'FÜRS NEST!'); fam.store(save); }
     particles.push({ ...e, t: 0 });
+    const said = { catch: e.kind === 'fish' ? 'EIN FISCH!' : e.kind === 'twig' ? 'EIN ZWEIG!' : e.kind === 'straw' ? 'STROH!' : 'GEFANGEN!', eat: `LECKER! +${e.value} ENERGIE`, feed: `FÜR ${me.brood.chick?.name || 'DAS KÜKEN'}!`, miss: 'NICHTS...' }[e.type];
+    if (said) say(said);
     if (e.type === 'splash') for (let i = 0; i < 14; i++) { const a = Math.random() * Math.PI * 2, s = 10 + Math.random() * 25; particles.push({ type: 'drop', x: e.x, y: e.y, vx: Math.cos(a) * s, vy: Math.sin(a) * s * 0.6, vz: 30 + Math.random() * 45, t: 0 }); }
   }
   if (bird.state === 'swim' && bird.v > 2 && (wake.at || 0) <= world.time) { wake.push({ x: bird.x, y: bird.y, a: bird.a, t: 0 }); wake.at = world.time + 0.12; }
@@ -409,12 +413,12 @@ function draw() {
       ctx.fillStyle = f.kind ? `rgba(255,226,90,${a})` : `rgba(253,251,246,${a})`; ctx.fillRect(px, py, q, q);
     }
   }
-  // fixed on its prey: brackets round it, closing in
+  // fixed on its prey (or the nest, a fish to dive for): a ring closing in on it, fading as it does, again and again
   const g = bird.target || nearFish();
   if (g && (g.nest || (g.kind ? g.gone <= 0 : g.t <= 0))) {
-    const r = (g.nest ? 20 : 7) + Math.sin(t * 8) * 1.5, x = Math.round(g.x), y = Math.round(g.y) - (g.nest ? PERCH : 2);
-    ctx.fillStyle = HEX.yellow;
-    for (const [sx, sy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) { ctx.fillRect(x + sx * r - (sx > 0 ? 3 : 0), y + sy * r - (sy > 0 ? 1 : 0), 4, 1); ctx.fillRect(x + sx * r - (sx > 0 ? 1 : 0), y + sy * r - (sy > 0 ? 3 : 0), 1, 4); }
+    const p = (t / 0.9) % 1, r0 = g.nest ? 20 : 7, r = r0 * (2.6 - 1.6 * p), x = g.x, y = g.y - (g.nest ? PERCH : 2);
+    ctx.strokeStyle = `rgba(255,226,90,${1 - p})`; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.ellipse(x, y, r, r * 0.6, 0, 0, Math.PI * 2); ctx.stroke();
   }
   // rays of sunlight (in the sun), slanting down from the top left: fixed on the world, each its own stretch of it
   const ray = open && world.weather === 'sun' ? 0.16 * wfade * (1 - dark) : 0, K = 0.6, RC = 230, RL = 420;
@@ -551,29 +555,11 @@ function hud(S, camx, camy) {
   ctx.fillStyle = HEX.charcoal; ctx.fillRect(pad + u, pad + u * 8, bw, u * 4);
   ctx.fillStyle = col; ctx.fillRect(pad + u, pad + u * 8, Math.round(bw * e), u * 4);
   ctx.fillStyle = tone(col, 'light'); ctx.fillRect(pad + u, pad + u * 8, Math.round(bw * e), u);
-  if (bird.energy < 20 && Math.sin(world.time * 8) > 0) text(ctx, bird.state === 'air' ? 'HUNGER! JAGEN!' : 'HUNGER!', pad, pad + u * 15, HEX.red, 'left', u);
-  const toChick = fam.hungry(me) && me.isl === me.home && !me.room;
-  const mat = bird.prey === 'twig' || bird.prey === 'straw', want = fam.needs(save, me);
-  if (mat) text(ctx, 'ZUM FELSEN, WO DAS NEST HIN SOLL', pad, pad + u * 23, HEX.yellow, 'left', u);
-  else if (bird.prey && (bird.state !== 'ground' || (toChick && !bird.perch?.nest))) text(ctx, toChick ? 'INS NEST ZUM KÜKEN, ODER AN LAND FRESSEN' : 'ZUM FRESSEN AN LAND', pad, pad + u * 23, HEX.yellow, 'left', u);
-  else if (nearFish()) text(ctx, 'EIN FISCH! NACH UNTEN: TAUCHEN', pad, pad + u * 23, HEX.yellow, 'left', u);
-  text(ctx, me.home ? fam.broodSay(me) : want ? fam.needSay(want) : 'FLIEG ÜBERS MEER: SUCH DIR EINE FREIE INSEL', pad, pad + u * 31, 'rgba(253,251,246,0.85)', 'left', u);
-  if (want && !mat) text(ctx, 'ZWEIGE: AN BÄUMEN, STROH: IN SCHEUNEN', pad, pad + u * 39, 'rgba(253,251,246,0.6)', 'left', u);
   // prey eaten
   const n = `${bird.caught}`, fx = cw - pad - textWidth(n) * u;
   text(ctx, n, fx, pad, HEX.white, 'left', u);
   ctx.save(); ctx.translate(fx - u * 10, pad); ctx.scale(u, u); ART.mouse.draw(ctx, 0, 0); ctx.restore();
   if (me.gems || world.room === 'cave') { const gn = `${me.gems}`, gx = cw - pad - textWidth(gn) * u; text(ctx, gn, gx, pad + u * 9, HEX.white, 'left', u); ctx.save(); ctx.translate(gx - u * 8, pad + u * 9); ctx.scale(u, u); ART.gem.draw(ctx, 0, 0); ctx.restore(); }
-  // what happened: risen words where it caught something, numbers where it ate
-  for (const p of particles) if (p.value || p.type === 'catch') {
-    const sx = cw / 2 + (p.x - camx) * S, sy = ch / 2 + (p.y - camy - 8) * S - p.t * 30 * u;
-    text(ctx, p.value ? `+${p.value}` : p.kind === 'fish' ? 'FISCH!' : p.kind === 'twig' ? 'EIN ZWEIG!' : p.kind === 'straw' ? 'STROH!' : 'GEFANGEN!', sx, sy, p.value ? HEX.white : HEX.yellow, 'center', u);
-  }
-  for (const p of particles) if (p.type === 'feed' || p.type === 'gem' || p.type === 'build') {
-    const sx = cw / 2 + (p.x - camx) * S, sy = ch / 2 + (p.y - camy - 8) * S - p.t * 30 * u;
-    text(ctx, p.type === 'build' ? 'FÜRS NEST!' : p.type === 'gem' ? 'EIN SCHATZ!' : `FÜR ${me.brood.chick?.name || 'DAS KÜKEN'}!`, sx, sy, p.type === 'gem' ? HEX.lightGreen : HEX.yellow, 'center', u);
-  }
-  for (const p of particles) if (p.type === 'miss' && p.t < 0.9) text(ctx, 'NICHTS...', cw / 2, ch / 2 - 30 * u, HEX.white, 'center', u);
   // off the screen, an arrow at the edge pointing to it: the nest (its own, or the place for one: the nest beside it),
   // in a cave its way out, on the open sea the next rock ahead
   const nestMine = !me.room && [me, null].includes(fam.residentOf(save, me.isl));
@@ -587,20 +573,21 @@ function hud(S, camx, camy) {
     ctx.fillStyle = HEX.yellow; ctx.strokeStyle = tone(HEX.charcoal, 'line'); ctx.lineWidth = u;
     ctx.beginPath(); ctx.moveTo(u * 8, 0); ctx.lineTo(-u * 4, -u * 6); ctx.lineTo(-u * 1, 0); ctx.lineTo(-u * 4, u * 6); ctx.closePath(); ctx.stroke(); ctx.fill();
     ctx.restore();
-    if (!aim.nest) text(ctx, world.room === 'cave' ? 'AUSGANG' : 'FELSEN', ax - Math.cos(a) * u * 16, ay - Math.sin(a) * u * 12 - u * 3, HEX.yellow, 'center', u);
     const n = ART.nest, q = Math.max(1, Math.round(u / 2));
     if (aim.nest) { ctx.save(); ctx.translate(Math.round(ax - Math.cos(a) * u * 14 - (n.w * q) / 2), Math.round(ay - Math.sin(a) * u * 12 - (n.h * q) / 2)); ctx.scale(q, q); n.draw(ctx, 0, 0); ctx.restore(); }
   }
   // the day and its weather; a new day: what it brings
-  const [wname, wsay] = SAY[island.weather];
+  const [wname] = SAY[island.weather];
   text(ctx, `TAG ${me.dayN}: ${wname}`, cw / 2, pad, HEX.white, 'center', u);
-  text(ctx, `${me.name}, ${me.room?.kind === 'cave' ? 'IN DER HÖHLE' : me.room?.kind === 'sea' ? `ÜBERS MEER, NOCH ${rocksAhead().length} FELSEN` : me.room ? 'IN DER SCHEUNE' : `INSEL ${islandName(me.isl)}`}`, cw / 2, pad + u * 9, 'rgba(253,251,246,0.75)', 'center', u);
-  if (banner > 0 && started) {
-    const a = Math.min(1, banner, 6 - banner), big = u * 2;
-    text(ctx, `TAG ${me.dayN}: ${wname}`, cw / 2, ch * 0.22, `rgba(253,251,246,${a})`, 'center', big);
-    text(ctx, wsay, cw / 2, ch * 0.22 + big * 9, `rgba(255,226,90,${a})`, 'center', u);
-  }
-  if (notice?.t > 0 && started) notice.text.split('\n').forEach((l, i) => text(ctx, l, cw / 2, ch * 0.42 + i * u * 9, `rgba(255,226,90,${Math.min(1, notice.t)})`, 'center', u));
+  // one line: what just happened (one after the other), else what to do now
+  const mat = bird.prey === 'twig' || bird.prey === 'straw', want = fam.needs(save, me), toChick = fam.hungry(me) && me.isl === me.home && !me.room;
+  const [msg, mcol] = notice ? [notice.text, `rgba(255,226,90,${Math.min(1, notice.t * 2)})`]
+    : bird.energy < 20 ? [bird.state === 'air' ? 'HUNGER! JAGEN!' : 'HUNGER!', Math.sin(world.time * 8) > 0 ? HEX.red : HEX.white]
+    : mat ? ['ZUM FELSEN, WO DAS NEST HIN SOLL', HEX.yellow]
+    : bird.prey && (bird.state !== 'ground' || (toChick && !bird.perch?.nest)) ? [toChick ? 'INS NEST ZUM KÜKEN' : 'ZUM FRESSEN AN LAND', HEX.yellow]
+    : nearFish() ? ['EIN FISCH! NACH UNTEN: TAUCHEN', HEX.yellow]
+    : [me.room?.kind === 'sea' ? `ÜBERS MEER: NOCH ${rocksAhead().length} FELSEN` : me.home ? fam.broodSay(me) : want ? fam.needSay(want) : 'FLIEG ÜBERS MEER ZU EINER FREIEN INSEL', 'rgba(253,251,246,0.85)'];
+  if (started) text(ctx, msg, cw / 2, pad + u * 17, mcol, 'center', u);
   if (bird.asleep) for (let i = 0; i < 3; i++) { // (asleep: Z z z rising)
     const f = (world.time * 0.6 + i / 3) % 1;
     text(ctx, 'Z', cw / 2 + (8 + f * 10) * u, ch / 2 - (14 + f * 22) * u, `rgba(253,251,246,${1 - f})`, 'left', Math.round(u * (1 + f)));
